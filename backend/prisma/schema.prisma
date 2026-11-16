@@ -1,0 +1,656 @@
+// PURRE PETS — Prisma schema (PostgreSQL)
+// Field names intentionally keep the Base44 naming (snake_case, created_date / updated_date,
+// created_by_id) so the frontend keeps working with the same payload shapes.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  password_hash  String
+  full_name      String?
+  role           String    @default("user") // "user" | "moderator" | "admin"
+  email_verified Boolean   @default(false)
+  banned         Boolean   @default(false)
+  is_premium     Boolean   @default(false) // subskrypcja 29,99 PLN/mies. — bez reklam
+  premium_until  DateTime? // data wygaśnięcia PREMIUM
+  stripe_customer_id String? // klient Stripe (subskrypcje PRO)
+  created_date   DateTime  @default(now())
+  updated_date   DateTime  @updatedAt
+
+  @@map("users")
+}
+
+model Profile {
+  id            String   @id @default(cuid())
+  user_id       String
+  account_type  String   @default("enthusiast") // "breeder" | "enthusiast"
+  display_name  String
+  handle        String?
+  kennel_name   String?
+  bio           String?
+  city          String?
+  lat           Float?
+  lng           Float?
+  avatar_url    String?
+  cover_url     String?
+  species       String[] @default([])
+  breeds        String[] @default([])
+  followers     Int      @default(0)
+  verified      Boolean  @default(false)
+  website_url   String?  // strona hodowli
+  instagram_url String?  // socials (profil PRO)
+  tiktok_url    String?
+  gallery_urls  String[] @default([]) // galeria profilu (max 12)
+  created_by_id String?
+  created_date  DateTime @default(now())
+  updated_date  DateTime @updatedAt
+
+  @@index([user_id])
+  @@index([followers])
+  @@map("profiles")
+}
+
+model Listing {
+  id              String    @id @default(cuid())
+  kind            String    @default("sale") // "sale" | "adoption"
+  title           String
+  description     String?
+  price           Float?
+  species         String? // "dog" | "cat"
+  breed           String?
+  age_months      Int?
+  sex             String? // "male" | "female"
+  city            String
+  lat             Float?
+  lng             Float?
+  image_urls      String[]  @default([])
+  video_urls      String[]  @default([])
+  seller_id       String?
+  seller_name     String?
+  seller_verified Boolean   @default(false)
+  status          String    @default("active") // "active" | "review" | "sold" | "archived"
+  boosted_until   DateTime?
+  risk            Float     @default(0)
+  moderation_note String?
+  created_by_id   String?
+  created_date    DateTime  @default(now())
+  updated_date    DateTime  @updatedAt
+
+  @@index([seller_id])
+  @@index([status])
+  @@index([city])
+  @@map("listings")
+}
+
+model Pet {
+  id             String    @id @default(cuid())
+  owner_id       String?
+  owner_name     String?
+  name           String
+  species        String? // "dog" | "cat"
+  breed          String?
+  birth_date     DateTime?
+  adoption_date  DateTime? // rocznica adopcji (E4)
+  sex            String? // "male" | "female"
+  color          String?
+  microchip      String?   // PRYWATNE — nigdy w widoku publicznym (E1/E8)
+  pedigree_no    String?   // numer rodowodu — prywatny domyślnie
+  origin_country String?
+  origin_kennel  String?
+  mother_name    String?
+  father_name    String?
+  siblings       String?
+  temperament    String?
+  interests      String?
+  special_needs  String?
+  status         String    @default("active") // "active" | "deceased" | "rehomed" | "memorial" (E8/Q14)
+  is_public      Boolean   @default(true) // E8: profil publiczny/prywatny — wybiera właściciel
+  bio            String?
+  photos         String[]  @default([])
+  pedigree       Boolean   @default(false)
+  city           String?
+  created_by_id  String?
+  created_date   DateTime  @default(now())
+  updated_date   DateTime  @updatedAt
+
+  @@index([owner_id])
+  @@map("pets")
+}
+
+model Post {
+  id              String   @id @default(cuid())
+  author_id       String?
+  author_name     String?
+  author_handle   String?
+  author_avatar   String?
+  author_verified Boolean  @default(false)
+  city            String?
+  breed           String?
+  caption         String
+  image_url       String?
+  image_urls      String[] @default([])
+  video_url       String?
+  group_id        String? // post w grupie (jak na Facebooku)
+  tags            String[] @default([])
+  likes           Int      @default(0)
+  comment_count   Int      @default(0)
+  status          String   @default("published") // "published" | "review" | "hidden"
+  risk            Float    @default(0)
+  created_by_id   String?
+  created_date    DateTime @default(now())
+  updated_date    DateTime @updatedAt
+
+  @@index([author_id])
+  @@index([status])
+  @@index([group_id])
+  @@map("posts")
+}
+
+model Comment {
+  id            String   @id @default(cuid())
+  post_id       String
+  author_id     String?
+  author_name   String?
+  author_avatar String?
+  content       String
+  status        String   @default("published") // "published" | "hidden"
+  created_by_id String?
+  created_date  DateTime @default(now())
+  updated_date  DateTime @updatedAt
+
+  @@index([post_id])
+  @@map("comments")
+}
+
+model Like {
+  id            String   @id @default(cuid())
+  post_id       String
+  user_id       String
+  created_by_id String?
+  created_date  DateTime @default(now())
+  updated_date  DateTime @updatedAt
+
+  @@unique([post_id, user_id])
+  @@index([post_id])
+  @@map("likes")
+}
+
+model Follow {
+  id             String   @id @default(cuid())
+  follower_id    String?
+  following_id   String
+  following_name String?
+  created_by_id  String?
+  created_date   DateTime @default(now())
+  updated_date   DateTime @updatedAt
+
+  @@unique([follower_id, following_id])
+  @@index([follower_id])
+  @@index([following_id])
+  @@map("follows")
+}
+
+model Conversation {
+  id              String    @id @default(cuid())
+  members         String[]  @default([])
+  member_names    String[]  @default([])
+  listing_id      String?
+  listing_title   String?
+  last_message    String?
+  last_sender_id  String?
+  last_message_at DateTime?
+  unread          Int       @default(0)
+  created_by_id   String?
+  created_date    DateTime  @default(now())
+  updated_date    DateTime  @updatedAt
+
+  @@map("conversations")
+}
+
+model Message {
+  id              String    @id @default(cuid())
+  conversation_id String
+  members         String[]  @default([])
+  sender_id       String?
+  sender_name     String?
+  content         String
+  media_url       String?   // zdjęcie / wideo w wiadomości
+  media_type      String?   // "image" | "video"
+  ciphertext      String?   // E2E: treść zaszyfrowana AES-GCM (ECDH P-256)
+  iv              String?   // E2E: wektor inicjalizujący
+  e2e             Boolean   @default(false) // E2E: wiadomość zaszyfrowana end-to-end
+  seen            Boolean   @default(false)
+  delivered_at    DateTime?
+  read_at         DateTime?
+  deleted         Boolean   @default(false)
+  created_by_id   String?
+  created_date    DateTime  @default(now())
+  updated_date    DateTime  @updatedAt
+
+  @@index([conversation_id, created_date])
+  @@map("messages")
+}
+
+model MessageReaction {
+  id         String   @id @default(cuid())
+  message_id String
+  user_id    String
+  emoji      String
+  created_date DateTime @default(now())
+
+  @@unique([message_id, user_id])
+  @@index([message_id])
+  @@map("message_reactions")
+}
+
+model Wallet {
+  id            String    @id @default(cuid())
+  user_id       String    @unique
+  coins         Int       @default(0)
+  xp            Int       @default(0)
+  level         Int       @default(1)
+  frame         String?
+  badges        String[]  @default([])
+  boost_until   DateTime?
+  extra_media   Int       @default(0)
+  daily_done_on String?
+  created_date  DateTime  @default(now())
+  updated_date  DateTime  @updatedAt
+
+  @@map("wallets")
+}
+
+model Redemption {
+  id           String   @id @default(cuid())
+  user_id      String
+  reward_key   String
+  reward_label String?
+  cost         Int
+  status       String   @default("applied") // "applied" | "pending"
+  target_id    String?
+  created_date DateTime @default(now())
+  updated_date DateTime @updatedAt
+
+  @@index([user_id])
+  @@map("redemptions")
+}
+
+model GameScore {
+  id           String   @id @default(cuid())
+  user_id      String?
+  user_name    String?
+  game         String // "2048" | "memory" | "quiz" | "puzzle"
+  score        Int
+  coins_earned Int      @default(0)
+  duration_ms  Int?
+  created_date DateTime @default(now())
+  updated_date DateTime @updatedAt
+
+  @@index([score])
+  @@index([user_id, game])
+  @@map("game_scores")
+}
+
+model Event {
+  id             String    @id @default(cuid())
+  title          String
+  description    String?
+  location       String?
+  city           String?
+  lat            Float?
+  lng            Float?
+  start_date     DateTime
+  end_date       DateTime?
+  price_coins    Int       @default(0)
+  cover_url      String?
+  organizer_id   String?
+  organizer_name String?
+  status         String    @default("published") // "draft" | "published" | "cancelled"
+  created_by_id  String?
+  created_date   DateTime  @default(now())
+  updated_date   DateTime  @updatedAt
+
+  @@index([status, start_date])
+  @@index([city])
+  @@map("events")
+}
+
+model EventTicket {
+  id            String   @id @default(cuid())
+  event_id      String
+  user_id       String
+  user_name     String?
+  coins_paid    Int      @default(0)
+  created_by_id String?
+  created_date  DateTime @default(now())
+  updated_date  DateTime @updatedAt
+
+  @@unique([event_id, user_id])
+  @@index([user_id])
+  @@map("event_tickets")
+}
+
+model Group {
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  type          String   @default("topic") // "breed" | "regional" | "topic"
+  city          String?
+  breed         String?
+  cover_url     String?
+  rules         String?
+  is_public     Boolean  @default(true)
+  members_count Int      @default(1)
+  created_by_id String?
+  created_date  DateTime @default(now())
+  updated_date  DateTime @updatedAt
+
+  @@index([type])
+  @@map("groups")
+}
+
+model GroupMember {
+  id         String   @id @default(cuid())
+  group_id   String
+  user_id    String
+  role       String   @default("member") // "member" | "admin"
+  created_by_id String?
+  created_date DateTime @default(now())
+  updated_date DateTime @updatedAt
+
+  @@unique([group_id, user_id])
+  @@index([user_id])
+  @@map("group_members")
+}
+
+model VerificationRequest {
+  id                String    @id @default(cuid())
+  user_id           String
+  kennel_name       String
+  registry_no       String?
+  city              String?
+  species           String?
+  document_url      String?
+  note              String?
+  status            String    @default("pending") // "pending" | "approved" | "rejected"
+  reviewer_note     String?
+  ai_recommendation String?   // "approve" | "reject" | "manual"
+  ai_score          Float?
+  ai_reasoning      String?
+  ai_analyzed_at    DateTime?
+  created_by_id     String?
+  created_date      DateTime  @default(now())
+  updated_date      DateTime  @updatedAt
+
+  @@index([status])
+  @@index([user_id])
+  @@map("verification_requests")
+}
+
+model CoinPurchase {
+  id                String   @id @default(cuid())
+  user_id           String
+  package_id        String
+  coins             Int
+  amount            Int
+  currency          String   @default("pln")
+  stripe_session_id String   @unique
+  status            String   @default("paid")
+  created_date      DateTime @default(now())
+  updated_date      DateTime @updatedAt
+
+  @@index([user_id])
+  @@map("coin_purchases")
+}
+
+model OtpCode {
+  id           String   @id @default(cuid())
+  email        String
+  code_hash    String
+  expires_at   DateTime
+  used         Boolean  @default(false)
+  created_date DateTime @default(now())
+
+  @@index([email])
+  @@map("otp_codes")
+}
+
+model Notification {
+  id         String   @id @default(cuid())
+  user_id    String
+  type       String // "like" | "comment" | "follow" | "message" | "system" | "verification" | "group" | "moderation"
+  title      String
+  body       String?
+  link       String?
+  actor_name String?
+  actor_avatar String?
+  read       Boolean  @default(false)
+  created_by_id String?
+  created_date DateTime @default(now())
+
+  @@index([user_id, read])
+  @@map("notifications")
+}
+
+model ReelAudio {
+  id         String   @id @default(cuid())
+  title      String
+  artist     String?
+  url        String
+  duration   Int? // sekundy
+  mood       String?
+  source     String   @default("library") // "library" | "upload"
+  usage_count Int     @default(0)
+  created_by_id String?
+  created_date DateTime @default(now())
+
+  @@index([title])
+  @@map("reel_audios")
+}
+
+model Report {
+  id           String   @id @default(cuid())
+  reporter_id  String?
+  reporter_name String?
+  target_type  String // "post" | "comment" | "listing" | "user" | "message"
+  target_id    String
+  reason       String
+  details      String?
+  status       String   @default("open") // "open" | "resolved" | "dismissed"
+  resolution   String?
+  created_date DateTime @default(now())
+  updated_date DateTime @updatedAt
+
+  @@index([status])
+  @@map("reports")
+}
+
+model E2eKey {
+  id           String   @id @default(cuid())
+  user_id      String
+  public_key   String // JWK klucza publicznego ECDH P-256
+  device_id    String   @default("default")
+  created_date DateTime @default(now())
+
+  @@index([user_id])
+  @@map("e2e_keys")
+}
+
+model Story {
+  id           String   @id @default(cuid())
+  author_id    String
+  author_name  String?
+  author_avatar String?
+  media_url    String
+  media_type   String   @default("image") // "image" | "video"
+  caption      String?
+  music_title  String?
+  music_url    String?
+  filter       String?  // preset filtra (Instagram-style): warm | cool | mono | vivid | fade | drama
+  overlay_text String?  // tekst nakładki na relacji
+  overlay_position String? // top | center | bottom
+  views        Int      @default(0)
+  viewers      String[] @default([])
+  expires_at   DateTime // relacja żyje 24 h
+  created_by_id String?
+  created_date DateTime @default(now())
+
+  @@index([author_id])
+  @@index([expires_at])
+  @@map("stories")
+}
+
+model StoryReaction {
+  id         String   @id @default(cuid())
+  story_id   String
+  user_id    String
+  emoji      String
+  created_by_id String?
+  created_date DateTime @default(now())
+
+  @@index([story_id])
+  @@map("story_reactions")
+}
+
+model Subscription {
+  id                     String    @id @default(cuid())
+  user_id                String
+  stripe_session_id      String    @unique
+  stripe_subscription_id String?
+  stripe_customer_id     String?
+  plan                   String    @default("month") // "month" | "year"
+  amount                 Int       @default(0) // grosze PLN
+  currency               String    @default("pln")
+  status                 String    @default("active") // "active" | "canceled" | "past_due"
+  current_period_end     DateTime?
+  created_date           DateTime  @default(now())
+  updated_date           DateTime  @updatedAt
+
+  @@index([user_id])
+  @@index([stripe_subscription_id])
+  @@map("subscriptions")
+}
+
+// ============================================================
+// MODUŁ E — KONTA ZWIERZĄT (E2–E9)
+// Wpisy zdrowotne i kalendarz tworzy wyłącznie właściciel/opiekun.
+// AI nie zapisuje tu niczego samodzielnie (E2: dawki tylko od użytkownika).
+// ============================================================
+
+// E2: cyfrowa książeczka zdrowia.
+model PetHealthRecord {
+  id             String    @id @default(cuid())
+  pet_id         String
+  kind           String    @default("note") // "vaccine" | "deworming" | "flea_tick" | "test" | "visit" | "treatment" | "allergy" | "illness" | "medication" | "note"
+  title          String
+  date           DateTime?
+  next_date      DateTime? // kolejna dawka / termin przypomnienia
+  details        String?   // dawkowanie/zalecenia — WYŁĄCZNIE wpis użytkownika wg zaleceń weterynarza
+  vet_name       String?
+  attachment_url String?
+  created_by_id  String?
+  created_date   DateTime  @default(now())
+  updated_date   DateTime  @updatedAt
+
+  @@index([pet_id, date])
+  @@map("pet_health_records")
+}
+
+// E5: waga i rozwój (wykres + historia).
+model PetMeasurement {
+  id            String    @id @default(cuid())
+  pet_id        String
+  weight_kg     Float?
+  height_cm     Float?
+  note          String?
+  measured_at   DateTime  @default(now())
+  created_by_id String?
+  created_date  DateTime  @default(now())
+  updated_date  DateTime  @updatedAt
+
+  @@index([pet_id, measured_at])
+  @@map("pet_measurements")
+}
+
+// E3: kalendarz zwierzęcia (przypomnienia zgodnie z wyborem użytkownika).
+model PetCalendarEvent {
+  id                 String    @id @default(cuid())
+  pet_id             String
+  kind               String    @default("other") // "vaccine" | "deworming" | "grooming" | "bath" | "nails" | "birthday" | "adoption" | "show" | "training" | "vet" | "medication" | "breeding" | "other"
+  title              String
+  date               DateTime
+  repeat             String    @default("none") // "none" | "weekly" | "monthly" | "yearly"
+  remind_days_before Int       @default(3) // 0 = bez przypomnienia
+  note               String?
+  done               Boolean   @default(false)
+  created_by_id      String?
+  created_date       DateTime  @default(now())
+  updated_date       DateTime  @updatedAt
+
+  @@index([pet_id, date])
+  @@map("pet_calendar_events")
+}
+
+// E6: medale i osiągnięcia. official=true WYŁĄCZNIE po potwierdzeniu przez moderatora/admina —
+// nigdy automatycznie (E6: oddzielenie osiągnięć własnych od oficjalnych wyróżnień).
+model PetAchievement {
+  id            String    @id @default(cuid())
+  pet_id        String
+  title         String
+  category      String    @default("custom") // "birthday" | "show" | "sport" | "training" | "breeding" | "community" | "custom"
+  date          DateTime?
+  description   String?
+  image_url     String?
+  organizer     String?
+  official      Boolean   @default(false)
+  confirmed     Boolean   @default(false) // oficjalne potwierdzone przez moderatora
+  confirmed_by  String?
+  created_by_id String?
+  created_date  DateTime  @default(now())
+  updated_date  DateTime  @updatedAt
+
+  @@index([pet_id])
+  @@map("pet_achievements")
+}
+
+// E9: rodzina i współwłaściciele — współdzielenie opieki i kalendarza.
+model PetCaregiver {
+  id            String   @id @default(cuid())
+  pet_id        String
+  user_id       String
+  role          String   @default("caregiver") // "co_owner" | "caregiver"
+  status        String   @default("active") // "active" | "invited"
+  invited_by    String?
+  created_by_id String?
+  created_date  DateTime @default(now())
+  updated_date  DateTime @updatedAt
+
+  @@unique([pet_id, user_id])
+  @@index([user_id])
+  @@map("pet_caregivers")
+}
+
+// ============================================================
+// MODUŁ I — STRIPE: idempotencja webhooka
+// Rejestr przetworzonych event_id — Stripe dostarcza eventy
+// co najmniej raz; bez rejestru ponowny delivery mógłby ponownie
+// uruchomić księgowanie monet / aktywację PRO.
+// ============================================================
+
+model StripeWebhookEvent {
+  id           String   @id @default(cuid())
+  event_id     String   @unique
+  type         String
+  created_date DateTime @default(now())
+
+  @@index([created_date])
+  @@map("stripe_webhook_events")
+}
