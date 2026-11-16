@@ -10,12 +10,20 @@ import { savePrivateVerificationDocument } from "../lib/private-verification-doc
 
 export const uploadsRouter = Router();
 
+// Katalogi zapisu nowych uploadów — WYŁĄCZNIE PurrePets. Reliktowe katalogi
+// /home/ubuntu/Base44 nie są tu używane: nigdy nie tworzymy w nich plików.
 const CANDIDATE_DIRS = [
   config.uploadDir,
   "/var/www/purrepets/uploads",
+  path.resolve("uploads"),
+].map((dir) => path.resolve(dir));
+
+// Tylko do ODCZYTU plików wgranych przed migracją aplikacji na
+// /home/ubuntu/PurrePets — istniejące URL-e w bazie muszą dalej działać
+// (zachowanie istniejących danych; nowe.uploady tam nie trafiają).
+const LEGACY_READ_DIRS = [
   "/home/ubuntu/Base44/uploads",
   "/home/ubuntu/Base44/backend/uploads",
-  path.resolve("uploads"),
 ].map((dir) => path.resolve(dir));
 
 function writableDir() {
@@ -193,7 +201,7 @@ function hasValidUploadSignature(filePath, mime) {
 function findFile(name) {
   const safe = path.basename(name);
   if (!safe || safe !== name || safe.includes("..")) return null;
-  for (const dir of CANDIDATE_DIRS) {
+  for (const dir of [...CANDIDATE_DIRS, ...LEGACY_READ_DIRS]) {
     const file = path.resolve(dir, safe);
     if (!file.startsWith(dir + path.sep) && file !== dir) continue;
     try {
