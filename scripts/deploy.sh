@@ -21,7 +21,7 @@
 # Opcjonalnie:   DEPLOY_BRANCH=main DEPLOY_NGINX=1 bash scripts/deploy.sh
 set -euo pipefail
 
-APP_DIR="/home/ubuntu/Base44"
+APP_DIR="/home/ubuntu/PurrePets"
 BACKEND="$APP_DIR/backend"
 BRANCH="${DEPLOY_BRANCH:-$(git rev-parse --abbrev-ref HEAD)}"
 FRONT_URL="${FRONT_URL:-http://127.0.0.1:3000}"

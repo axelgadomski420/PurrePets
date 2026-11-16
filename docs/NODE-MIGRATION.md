@@ -86,7 +86,7 @@ Backend (`backend/.env`): `DATABASE_URL`, `JWT_SECRET`, `JWT_EXPIRES_IN`, `PORT`
 
 ## 6. Wdrożenie na Oracle (skrót)
 
-    cd /home/ubuntu/Base44
+    cd /home/ubuntu/PurrePets
     git fetch origin
     git checkout fix/production-node-deployment
     # zapisz lokalne zmiany, jeśli są (git status; commit/stash)
@@ -108,7 +108,7 @@ Nginx (jednorazowo, po backupie istniejących plików):
 
 ## 7. Rollback
 
-    cd /home/ubuntu/Base44
+    cd /home/ubuntu/PurrePets
     git checkout main
     ls -1dt .output.bak-* | head -1        # ostatni działający build
     rm -rf .output && cp -a .output.bak-<STAMP> .output
