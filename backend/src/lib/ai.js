@@ -1,3 +1,5 @@
+import { ollamaGenerate } from "./ollama.js";
+
 /**
  * PURRE AI service helpers.
  * Prefers Ollama (OLLAMA_URL + OLLAMA_MODEL, default qwen2.5:3b).
@@ -8,39 +10,30 @@ const SYSTEM = `Jesteś PURRE Assistant — asystentem marketplace'u hodowlanego
 Odpowiadaj po polsku, zwięźle (max 900 znaków). Nie diagnozuj chorób — odsyłaj do weterynarza.
 Nie pomagaj omijać prawa ani handlować zwierzętami bez dokumentacji.`;
 
-export async function askOllama(prompt, { system = SYSTEM } = {}) {
-  const base = (process.env.OLLAMA_URL || "http://127.0.0.1:11434").replace(/\/$/, "");
-  const model = process.env.OLLAMA_MODEL || "qwen2.5:3b";
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Number(process.env.OLLAMA_TIMEOUT_MS || 25000));
-  try {
-    const response = await fetch(`${base}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        stream: false,
-        messages: [
-          { role: "system", content: system },
-          { role: "user", content: prompt },
-        ],
-        options: { temperature: 0.4, num_predict: 280 },
-      }),
-    });
-    if (!response.ok) return null;
-    const data = await response.json();
-    const text = data?.message?.content || data?.response || "";
-    return text ? String(text).slice(0, 900) : null;
-  } catch {
-    return null;
-  } finally {
-    clearTimeout(timer);
-  }
+export async function askOllama(prompt, { system = SYSTEM, timeoutMs = 120000 } = {}) {
+  const result = await ollamaGenerate(prompt, {
+    system,
+    timeoutMs,
+    numPredict: 280,
+  });
+
+  if (!result.ok || !result.text) return null;
+  return result.text.slice(0, 900);
 }
 
 export async function askExternalLlm(prompt) {
-  if (!process.env.ASSISTANT_LLM_URL || !process.env.ASSISTANT_LLM_KEY) return null;
+  if (!process.env.ASSISTANT_LLM_URL || !process.env.ASSISTANT_LLM_KEY) {
+    return null;
+  }
+
+  const configuredTimeout = Number(process.env.ASSISTANT_LLM_TIMEOUT_MS || 15000);
+  const timeoutMs = Number.isFinite(configuredTimeout)
+    ? Math.max(3000, Math.min(60000, Math.floor(configuredTimeout)))
+    : 15000;
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
     const response = await fetch(process.env.ASSISTANT_LLM_URL, {
       method: "POST",
@@ -48,24 +41,32 @@ export async function askExternalLlm(prompt) {
         "Content-Type": "application/json",
         Authorization: `Bearer ${process.env.ASSISTANT_LLM_KEY}`,
       },
+      signal: controller.signal,
       body: JSON.stringify({
         model: process.env.ASSISTANT_LLM_MODEL || "gpt-4o-mini",
         messages: [
           { role: "system", content: SYSTEM },
-          { role: "user", content: prompt },
+          { role: "user", content: String(prompt).slice(0, 20000) },
         ],
       }),
     });
+
     if (!response.ok) return null;
+
     const parsed = await response.json().catch(() => null);
     const answer =
       parsed?.choices?.[0]?.message?.content ||
       parsed?.content ||
       parsed?.answer ||
       (typeof parsed === "string" ? parsed : "");
-    return answer ? String(answer).slice(0, 900) : null;
+
+    return typeof answer === "string" && answer.trim()
+      ? answer.trim().slice(0, 900)
+      : null;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

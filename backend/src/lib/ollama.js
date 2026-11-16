@@ -2,7 +2,7 @@
 // Ogranicza czas żądania, rozmiar odpowiedzi i normalizuje błędy.
 import { config } from "../config.js";
 
-const DEFAULT_TIMEOUT_MS = 60000;
+const DEFAULT_TIMEOUT_MS = 120000;
 const MAX_TIMEOUT_MS = 180000;
 const MAX_RESPONSE_CHARS = 30000;
 
@@ -27,7 +27,7 @@ function safeErrorMessage(error) {
 
 export async function ollamaGenerate(
   prompt,
-  { system, model, timeoutMs = DEFAULT_TIMEOUT_MS } = {}
+  { system, model, timeoutMs = DEFAULT_TIMEOUT_MS, numPredict = 700 } = {}
 ) {
   const cleanPrompt = String(prompt ?? "").trim();
   if (!cleanPrompt) {
@@ -59,9 +59,10 @@ export async function ollamaGenerate(
         prompt: cleanPrompt,
         ...(system ? { system: String(system).slice(0, 5000) } : {}),
         stream: false,
+        keep_alive: "10m",
         options: {
           temperature: 0.2,
-          num_predict: 1600,
+          num_predict: Math.max(64, Math.min(2000, Math.floor(Number(numPredict) || 700))),
         },
       }),
     });
@@ -99,6 +100,7 @@ export async function ollamaGenerate(
 }
 
 export async function ollamaHealth() {
+  const configuredModel = String(config.ollamaModel || "").trim();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 4000);
 
@@ -108,20 +110,40 @@ export async function ollamaHealth() {
     });
 
     if (!response.ok) {
-      return { online: false, models: [] };
+      return {
+        online: false,
+        model: configuredModel,
+        modelAvailable: false,
+        models: [],
+      };
     }
 
     const data = await response.json();
     const models = Array.isArray(data?.models)
       ? data.models
-          .map((item) => String(item?.name || "").slice(0, 120))
+          .map((item) => String(item?.name || "").trim().slice(0, 120))
           .filter(Boolean)
           .slice(0, 50)
       : [];
 
-    return { online: true, models };
+    const modelAvailable = Boolean(
+      configuredModel &&
+      models.some((name) => name.toLowerCase() === configuredModel.toLowerCase())
+    );
+
+    return {
+      online: true,
+      model: configuredModel,
+      modelAvailable,
+      models,
+    };
   } catch {
-    return { online: false, models: [] };
+    return {
+      online: false,
+      model: configuredModel,
+      modelAvailable: false,
+      models: [],
+    };
   } finally {
     clearTimeout(timer);
   }

@@ -15,6 +15,29 @@ function canModerate(user) {
   return user?.role === "admin" || user?.role === "moderator";
 }
 
+
+const EXPURR_REPORT_MARKER =
+  "\n\n[ANALIZA EXPURR — wynik automatyczny, decyzja należy do moderatora]\n";
+
+function getExpurrReportAnalysis(details) {
+  const value = String(details || "");
+  const index = value.lastIndexOf(EXPURR_REPORT_MARKER);
+  if (index < 0) return null;
+
+  try {
+    return JSON.parse(value.slice(index + EXPURR_REPORT_MARKER.length).trim());
+  } catch {
+    return {
+      status: "invalid_result",
+      error: "Nie udało się odczytać zapisanego wyniku analizy.",
+    };
+  }
+}
+
+function getOriginalReportDetails(details) {
+  return String(details || "").split(EXPURR_REPORT_MARKER)[0].trim();
+}
+
 function AdminPage() {
   const { user, isAuthenticated, isLoadingAuth } = useAuth();
   const [data, setData] = useState(null);
@@ -26,6 +49,10 @@ function AdminPage() {
   const [mediaPreviews, setMediaPreviews] = useState({});
   const [mediaLoading, setMediaLoading] = useState(false);
   const [mediaBusy, setMediaBusy] = useState("");
+  const [reportItems, setReportItems] = useState([]);
+  const [reportsLoading, setReportsLoading] = useState(false);
+  const [reportBusy, setReportBusy] = useState("");
+
 
   useEffect(() => {
     return () => {
@@ -41,6 +68,41 @@ function AdminPage() {
         setError("");
       })
       .catch((err) => setError(err?.message ?? "Brak dostępu"));
+  };
+
+
+  const loadReports = async () => {
+    setReportsLoading(true);
+    try {
+      const payload = await base44.admin.reports();
+      setReportItems(Array.isArray(payload?.items) ? payload.items : []);
+    } catch (err) {
+      toast.error(err?.message ?? "Nie udało się pobrać zgłoszeń");
+    } finally {
+      setReportsLoading(false);
+    }
+  };
+
+  const decideReport = async (id, action) => {
+    setReportBusy(id + action);
+    try {
+      await base44.admin.resolveReport(id, {
+        action,
+        resolution: action === "hide"
+          ? "Treść ukryta po analizie zgłoszenia przez moderatora."
+          : "Zgłoszenie odrzucone przez moderatora.",
+      });
+
+      toast.success(
+        action === "hide" ? "Treść została ukryta" : "Zgłoszenie odrzucone"
+      );
+      await loadReports();
+      load();
+    } catch (err) {
+      toast.error(err?.message ?? "Nie udało się zapisać decyzji");
+    } finally {
+      setReportBusy("");
+    }
   };
 
   useEffect(() => {
@@ -62,6 +124,7 @@ function AdminPage() {
 
   useEffect(() => {
     if (tab === "media") loadMediaQueue();
+    if (tab === "reports") loadReports();
   }, [tab]);
 
   const openMediaPreview = async (id) => {
@@ -203,7 +266,7 @@ function AdminPage() {
         </h1>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          {["overview", "verifications", "listings", "posts", "media"].map((key) => (
+          {["overview", "verifications", "listings", "posts", "media", "reports"].map((key) => (
             <button
               key={key}
               type="button"
@@ -217,6 +280,7 @@ function AdminPage() {
               {key === "listings" && "Ogłoszenia"}
               {key === "posts" && "Posty"}
               {key === "media" && "Moderacja mediów"}
+              {key === "reports" && "Zgłoszenia Expurr"}
             </button>
           ))}
         </div>
@@ -407,6 +471,199 @@ function AdminPage() {
                   </div>
                 </article>
               ))}
+            </div>
+          </section>
+        )}
+
+
+        {tab === "reports" && (
+          <section className="mt-8 min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold">Zgłoszenia naruszeń — Expurr AI</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Analiza wykonywana po zgłoszeniu. Ostateczną decyzję podejmuje moderator.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={loadReports}
+                disabled={reportsLoading}
+                className="rounded-xl border border-border/70 px-3 py-2 text-xs disabled:opacity-50"
+              >
+                {reportsLoading ? "Pobieranie..." : "Odśwież zgłoszenia"}
+              </button>
+            </div>
+
+            {reportsLoading && (
+              <p className="mt-4 text-sm text-muted-foreground">Pobieranie zgłoszeń...</p>
+            )}
+
+            {!reportsLoading && reportItems.length === 0 && (
+              <p className="mt-4 text-sm text-muted-foreground">
+                Brak otwartych zgłoszeń.
+              </p>
+            )}
+
+            <div className="mt-4 space-y-4">
+              {reportItems.map((report) => {
+                const analysis = getExpurrReportAnalysis(report.details);
+                const originalDetails = getOriginalReportDetails(report.details);
+                const textResult = analysis?.text;
+                const imageResult = analysis?.image;
+                const canHide = ["post", "comment", "listing"].includes(report.target_type);
+
+                return (
+                  <article
+                    key={report.id}
+                    className="min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-card/60 p-4"
+                  >
+                    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                      <h3 className="break-words text-sm font-semibold">
+                        {report.target_type} · {report.reason}
+                      </h3>
+                      <span className="rounded-lg border border-border px-2 py-1 text-[10px]">
+                        {report.status}
+                      </span>
+                    </div>
+
+                    <p className="mt-2 break-all text-[11px] text-muted-foreground">
+                      ID treści: {report.target_id}
+                    </p>
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      Zgłaszający: {report.reporter_name || "Anonim"}
+                      {" · "}
+                      {report.created_date
+                        ? new Date(report.created_date).toLocaleString("pl-PL")
+                        : "—"}
+                    </p>
+
+                    {originalDetails && (
+                      <div className="mt-3 rounded-xl bg-background/60 p-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Dodatkowe informacje
+                        </p>
+                        <p className="mt-1 whitespace-pre-wrap break-words text-xs">
+                          {originalDetails}
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="mt-3 rounded-xl border border-border/70 p-3">
+                      <p className="text-xs font-semibold">Analiza Expurr</p>
+
+                      {!analysis && (
+                        <p className="mt-2 text-xs text-muted-foreground">
+                          Analiza oczekuje na wynik lub nie została jeszcze zapisana.
+                        </p>
+                      )}
+
+                      {analysis && (
+                        <>
+                          <p className="mt-2 text-xs">
+                            Status: <strong>{analysis.status || "brak danych"}</strong>
+                          </p>
+
+                          {textResult && (
+                            <div className="mt-3">
+                              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                Analiza tekstu
+                              </p>
+                              <p className="mt-1 text-xs">
+                                Ryzyko: <strong>
+                                  {typeof textResult.risk === "number"
+                                    ? Math.round(textResult.risk * 100) + "%"
+                                    : "brak danych"}
+                                </strong>
+                                {" · "}
+                                Ocena: {textResult.status || "brak"}
+                              </p>
+                              {Array.isArray(textResult.flags) && textResult.flags.length > 0 && (
+                                <p className="mt-1 break-words text-xs text-muted-foreground">
+                                  Kategorie: {textResult.flags.join(", ")}
+                                </p>
+                              )}
+                              {textResult.error && (
+                                <p className="mt-1 break-words text-xs text-destructive">
+                                  {textResult.error}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          {imageResult && (
+                            <div className="mt-3">
+                              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                Analiza obrazu Qwen3-VL
+                              </p>
+                              <p className="mt-1 break-words text-xs">
+                                Decyzja: <strong>{imageResult.decision || "brak"}</strong>
+                                {" · "}
+                                Pewność: {typeof imageResult.confidence === "number"
+                                  ? Math.round(imageResult.confidence * 100) + "%"
+                                  : "brak danych"}
+                              </p>
+                              {imageResult.summary && (
+                                <p className="mt-1 break-words text-xs text-muted-foreground">
+                                  {imageResult.summary}
+                                </p>
+                              )}
+                              {Array.isArray(imageResult.categories) &&
+                                imageResult.categories.length > 0 && (
+                                  <p className="mt-1 break-words text-xs text-muted-foreground">
+                                    Kategorie: {imageResult.categories.join(", ")}
+                                  </p>
+                                )}
+                              {imageResult.error && (
+                                <p className="mt-1 break-words text-xs text-destructive">
+                                  {imageResult.error}
+                                </p>
+                              )}
+                            </div>
+                          )}
+
+                          {analysis.media_note && (
+                            <p className="mt-2 break-words text-xs text-muted-foreground">
+                              {analysis.media_note}
+                            </p>
+                          )}
+
+                          {analysis.error && (
+                            <p className="mt-2 break-words text-xs text-destructive">
+                              {analysis.error}
+                            </p>
+                          )}
+
+                          <p className="mt-3 text-[10px] text-muted-foreground">
+                            Wynik AI jest wskazówką. Nie stanowi automatycznej decyzji o naruszeniu.
+                          </p>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {canHide && (
+                        <button
+                          type="button"
+                          disabled={reportBusy !== ""}
+                          onClick={() => decideReport(report.id, "hide")}
+                          className="btn-aura rounded-xl px-3 py-2 text-[10px] font-semibold disabled:opacity-40"
+                        >
+                          {reportBusy === report.id + "hide" ? "Zapisywanie..." : "Ukryj zgłoszoną treść"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        disabled={reportBusy !== ""}
+                        onClick={() => decideReport(report.id, "dismiss")}
+                        className="rounded-xl border border-border/70 px-3 py-2 text-[10px] font-semibold disabled:opacity-40"
+                      >
+                        {reportBusy === report.id + "dismiss" ? "Zapisywanie..." : "Odrzuć zgłoszenie"}
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
             </div>
           </section>
         )}

@@ -32,6 +32,8 @@ export default function AssistantPanel() {
     },
   ]);
   const [health, setHealth] = useState(null);
+  const [conversationId, setConversationId] = useState("");
+  const [historyLoading, setHistoryLoading] = useState(false);
   const endRef = useRef(null);
 
   useEffect(() => {
@@ -40,6 +42,51 @@ export default function AssistantPanel() {
       .then((page) => setPets(page.items ?? []))
       .catch(() => setPets([]));
   }, [open, user]);
+
+  useEffect(() => {
+    if (!open || !isAuthenticated || !user) return;
+
+    let active = true;
+    setHistoryLoading(true);
+
+    const restoreHistory = async () => {
+      try {
+        const result = await base44.functions.aiConversations();
+        let conversation = result?.items?.[0];
+
+        if (!conversation?.id) {
+          const created = await base44.functions.createAiConversation();
+          conversation = created?.conversation;
+        }
+
+        if (!conversation?.id) throw new Error("Nie udało się otworzyć rozmowy.");
+
+        const history = await base44.functions.aiConversationMessages(conversation.id);
+        if (!active) return;
+
+        setConversationId(conversation.id);
+        if (Array.isArray(history?.items) && history.items.length) {
+          setMessages(history.items.map((item) => ({
+            role: item.role,
+            text: item.text,
+            source: item.role === "assistant" ? "ollama" : undefined,
+          })));
+        }
+      } catch (error) {
+        if (active) {
+          setMessages((current) => current.length > 1 ? current : [
+            current[0],
+            { role: "assistant", text: error?.message || "Nie udało się odtworzyć historii.", source: "error" },
+          ]);
+        }
+      } finally {
+        if (active) setHistoryLoading(false);
+      }
+    };
+
+    void restoreHistory();
+    return () => { active = false; };
+  }, [open, isAuthenticated, user]);
 
   useEffect(() => {
     if (!open) return;
@@ -74,6 +121,30 @@ export default function AssistantPanel() {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, open]);
 
+  const startNewConversation = async () => {
+    if (busy || historyLoading) return;
+    try {
+      setHistoryLoading(true);
+      const result = await base44.functions.createAiConversation();
+      const id = result?.conversation?.id;
+      if (!id) throw new Error("Nie udało się utworzyć rozmowy.");
+      setConversationId(id);
+      setMessages([{
+        role: "assistant",
+        text: "Nowa rozmowa. Jestem Expurr — w czym mogę pomóc?",
+        source: "rules",
+      }]);
+    } catch (error) {
+      setMessages((current) => [...current, {
+        role: "assistant",
+        text: error?.message || "Nie udało się utworzyć nowej rozmowy.",
+        source: "error",
+      }]);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   const ask = async (question) => {
     const q = (question || input).trim();
     if (!q || busy) return;
@@ -82,37 +153,35 @@ export default function AssistantPanel() {
       return;
     }
     setInput("");
-    const history = messages.slice(-8).map((m) => ({ role: m.role, text: m.text }));
     setMessages((m) => [...m, { role: "user", text: q }]);
     setBusy(true);
     try {
+      let activeConversationId = conversationId;
+      if (!activeConversationId) {
+        const created = await base44.functions.createAiConversation();
+        activeConversationId = created?.conversation?.id;
+        if (!activeConversationId) throw new Error("Nie udało się utworzyć rozmowy.");
+        setConversationId(activeConversationId);
+      }
+
       // Główna ścieżka: lokalny LLM (Ollama) przez /api/ai/chat.
       const result = await base44.functions.aiChat({
         message: q,
         prompt: q,
-        history,
+        conversation_id: activeConversationId,
         ...(petId ? { pet_id: petId } : {}),
       });
       const answer = result?.response || result?.answer || "…";
       setMessages((m) => [...m, { role: "assistant", text: answer, source: "ollama" }]);
     } catch (err) {
-      // Fallback: stary asystent regułowy.
-      try {
-        const result = await base44.functions.askAssistant({ question: q });
-        setMessages((m) => [
-          ...m,
-          { role: "assistant", text: result?.answer || String(result), source: result?.source || "rules" },
-        ]);
-      } catch (fallbackErr) {
-        setMessages((m) => [
-          ...m,
-          {
-            role: "assistant",
-            text: fallbackErr?.message || err?.message || "Nie udało się uzyskać odpowiedzi.",
-            source: "error",
-          },
-        ]);
-      }
+      setMessages((m) => [
+        ...m,
+        {
+          role: "assistant",
+          text: err?.message || "Expurr jest chwilowo niedostępny. Spróbuj ponownie za chwilę.",
+          source: "error",
+        },
+      ]);
     } finally {
       setBusy(false);
     }
@@ -136,13 +205,23 @@ export default function AssistantPanel() {
             <div className="min-w-0 flex-1">
               <p className="font-display text-sm">Expurr — ekspert psów i kotów</p>
               <p className="text-[10px] text-muted-foreground">
-                {health === null
-                    ? "Sprawdzam połączenie…"
-                    : health.ollama
-                      ? `Ollama · ${health.model ?? "lokalny model"}`
-                      : "Model chwilowo niedostępny"}
+                {historyLoading
+                    ? "Odtwarzam historię…"
+                    : health === null
+                      ? "Sprawdzam połączenie…"
+                      : health.ollama
+                        ? `Ollama · ${health.model ?? "lokalny model"}`
+                        : "Model chwilowo niedostępny"}
               </p>
             </div>
+            <button
+              type="button"
+              onClick={startNewConversation}
+              disabled={busy || historyLoading}
+              className="shrink-0 rounded-lg border border-border/60 px-2 py-1 text-[10px] text-muted-foreground disabled:opacity-50"
+            >
+              Nowa
+            </button>
           </div>
 
           <div className="flex-1 space-y-3 overflow-y-auto px-3 py-3">

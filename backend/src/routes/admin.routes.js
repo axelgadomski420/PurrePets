@@ -437,6 +437,19 @@ adminRouter.delete(
 );
 
 // POST /api/admin/reports/:id — rozpatrzenie zgłoszenia (moderator; ban tylko admin główny).
+
+adminRouter.get(
+  "/reports",
+  asyncHandler(async (_req, res) => {
+    const items = await prisma.report.findMany({
+      where: { status: "open" },
+      orderBy: { created_date: "desc" },
+      take: 100,
+    });
+    res.json({ items });
+  })
+);
+
 adminRouter.post(
   "/reports/:id",
   asyncHandler(async (req, res) => {
@@ -491,6 +504,207 @@ adminRouter.get(
 );
 
 // POST /api/admin/reports — utworzenie zgłoszenia (użytkownik).
+
+function reportTextValue(value) {
+  return typeof value === "string" ? value.trim().slice(0, 12000) : "";
+}
+
+function reportImageName(value) {
+  if (typeof value !== "string" || !value.trim()) return null;
+
+  try {
+    const pathname = new URL(value, "http://localhost").pathname;
+    const match = pathname.match(/^\/api\/uploads\/file\/([^/]+)$/);
+    if (!match) return null;
+
+    const name = decodeURIComponent(match[1]);
+    return name && name === name.split(/[\\/]/).pop() ? name : null;
+  } catch {
+    return null;
+  }
+}
+
+function reportImageList(value) {
+  if (Array.isArray(value)) return value.filter((item) => typeof item === "string");
+
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed.filter((item) => typeof item === "string");
+    } catch {
+      return [value];
+    }
+  }
+
+  return [];
+}
+
+/**
+ * Analiza treść dopiero po utworzeniu zgłoszenia.
+ * Wynik jest informacyjny — nie ukrywa treści i nie karze kont.
+ */
+async function analyzeReportedContent(report) {
+  const analysis = {
+    source: "expurr-report",
+    status: "completed",
+    analyzed_at: new Date().toISOString(),
+    requires_human_review: true,
+    text: null,
+    image: null,
+    media_note: null,
+  };
+
+  try {
+    let text = "";
+    let imageCandidates = [];
+
+    if (report.target_type === "post") {
+      const item = await prisma.post.findUnique({
+        where: { id: report.target_id },
+        select: { caption: true, image_url: true, image_urls: true },
+      });
+
+      if (!item) {
+        analysis.status = "target_not_found";
+      } else {
+        text = reportTextValue(item.caption);
+        imageCandidates = [
+          ...(item.image_url ? [item.image_url] : []),
+          ...reportImageList(item.image_urls),
+        ];
+      }
+    } else if (report.target_type === "listing") {
+      const item = await prisma.listing.findUnique({
+        where: { id: report.target_id },
+        select: { title: true, description: true, image_urls: true },
+      });
+
+      if (!item) {
+        analysis.status = "target_not_found";
+      } else {
+        text = [item.title, item.description]
+          .map(reportTextValue)
+          .filter(Boolean)
+          .join("\n");
+        imageCandidates = reportImageList(item.image_urls);
+      }
+    } else if (report.target_type === "comment") {
+      const item = await prisma.comment.findUnique({
+        where: { id: report.target_id },
+        select: { content: true },
+      });
+
+      if (!item) {
+        analysis.status = "target_not_found";
+      } else {
+        text = reportTextValue(item.content);
+      }
+    } else if (report.target_type === "message") {
+      const item = await prisma.message.findUnique({
+        where: { id: report.target_id },
+        select: {
+          content: true,
+          media_url: true,
+          media_type: true,
+          ciphertext: true,
+          e2e: true,
+        },
+      });
+
+      if (!item) {
+        analysis.status = "target_not_found";
+      } else if (item.e2e === true || item.ciphertext) {
+        // Nie wysyłamy szyfrogramu ani prywatnej wiadomości E2E do modelu.
+        analysis.media_note = "Wiadomość szyfrowana E2E — analiza treści pominięta.";
+      } else {
+        text = reportTextValue(item.content);
+        if (item.media_type && String(item.media_type).startsWith("image/")) {
+          imageCandidates = item.media_url ? [item.media_url] : [];
+        }
+      }
+    }
+
+    if (text) {
+      try {
+        const ai = await import("../lib/ai.js");
+        if (typeof ai.moderateText === "function") {
+          analysis.text = await ai.moderateText(text);
+        } else {
+          analysis.text = { error: "Nie znaleziono funkcji moderateText." };
+        }
+      } catch (error) {
+        analysis.text = {
+          error: String(error?.message || error).slice(0, 300),
+        };
+      }
+    }
+
+    // Qwen3-VL obsługuje tutaj obrazy, nie pliki wideo.
+    const imageName = imageCandidates.map(reportImageName).find(Boolean);
+
+    if (imageName) {
+      try {
+        const uploadsModule = await import("./uploads.routes.js");
+        const media = uploadsModule.readPublicUploadForModeration(imageName);
+
+        if (media) {
+          const moderation = await import("../lib/expurr-moderation.js");
+          analysis.image = await moderation.moderateImageBuffer(
+            media.buffer,
+            media.mimeType
+          );
+        } else {
+          analysis.media_note = "Nie udało się bezpiecznie odczytać zgłoszonego obrazu.";
+        }
+      } catch (error) {
+        analysis.image = {
+          decision: "review",
+          error: String(error?.message || error).slice(0, 300),
+        };
+      }
+    } else if (imageCandidates.length) {
+      analysis.media_note = "Nie znaleziono lokalnego obrazu do analizy.";
+    }
+
+    if (
+      imageCandidates.some((item) =>
+        typeof item === "string" && /\.(mp4|webm|mov|m4v)(?:$|[?#])/i.test(item)
+      )
+    ) {
+      analysis.media_note = "Wideo wymaga osobnej analizy klatek — obecny moduł analizuje obrazy.";
+    }
+  } catch (error) {
+    analysis.status = "analysis_error";
+    analysis.error = String(error?.message || error).slice(0, 500);
+  }
+
+  try {
+    const current = await prisma.report.findUnique({
+      where: { id: report.id },
+      select: { details: true },
+    });
+
+    if (!current) return;
+
+    const original = String(current.details || "").slice(0, 1000);
+    const marker = "\n\n[ANALIZA EXPURR — wynik automatyczny, decyzja należy do moderatora]\n";
+    const serialized = JSON.stringify(analysis).slice(0, 3500);
+
+    await prisma.report.update({
+      where: { id: report.id },
+      data: {
+        details: `${original}${marker}${serialized}`.slice(0, 5000),
+      },
+    });
+  } catch (error) {
+    console.error(
+      "[Expurr report analysis] Nie udało się zapisać wyniku:",
+      error?.message || error
+    );
+  }
+}
+
+
 export const reportsRouter = Router();
 reportsRouter.post(
   "/",
@@ -512,6 +726,15 @@ reportsRouter.post(
         details: String(req.body?.details ?? "").slice(0, 1000) || null,
       },
     });
+    // Zwracamy zgłoszenie od razu. Analiza działa w tle,
+    // dopiero po zgłoszeniu i nie blokuje publikacji ani uploadu.
     res.status(201).json(report);
+
+    void analyzeReportedContent(report).catch((error) => {
+      console.error(
+        "[Expurr report analysis] Błąd zadania:",
+        error?.message || error
+      );
+    });
   })
 );

@@ -122,14 +122,23 @@ messagesRouter.get(
   asyncHandler(async (req, res) => {
     const q = (typeof req.query.q === "string" ? req.query.q : "").trim();
     const conversations = await prisma.conversation.findMany({
-      where: { members: { has: req.user.id } },
+      where: {
+        members: { has: req.user.id },
+      },
       orderBy: { last_message_at: "desc" },
-      take: 200,
+      take: 250,
     });
-    let items = conversations;
+
+    // Rozmowy Expurr nie należą do Messengera.
+    // Filtr w pamięci zachowuje zwykłe rozmowy z listing_id = NULL.
+    const visibleConversations = conversations.filter(
+      (c) => !String(c.listing_id || "").startsWith("__expurr__:")
+    );
+
+    let items = visibleConversations;
     if (q) {
       const needle = q.toLowerCase();
-      items = conversations.filter((c) =>
+      items = visibleConversations.filter((c) =>
         (c.member_names ?? []).some((n) => (n ?? "").toLowerCase().includes(needle)) ||
         (c.listing_title ?? "").toLowerCase().includes(needle) ||
         (c.last_message ?? "").toLowerCase().includes(needle)

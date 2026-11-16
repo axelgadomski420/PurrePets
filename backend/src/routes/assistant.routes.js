@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "../lib/auth.js";
 import { asyncHandler } from "../lib/errors.js";
 import { answerQuestion, moderateText } from "../lib/ai.js";
+import { ollamaHealth } from "../lib/ollama.js";
 
 export const assistantRouter = Router();
 
@@ -34,18 +35,18 @@ assistantRouter.post(
 assistantRouter.get(
   "/health",
   asyncHandler(async (_req, res) => {
-    const base = (process.env.OLLAMA_URL || "http://127.0.0.1:11434").replace(/\/$/, "");
-    let ollama = false;
-    try {
-      const r = await fetch(`${base}/api/tags`, { signal: AbortSignal.timeout(2000) });
-      ollama = r.ok;
-    } catch {
-      ollama = false;
-    }
+    const health = await ollamaHealth();
+
     res.json({
-      ollama,
-      model: process.env.OLLAMA_MODEL || "qwen2.5:3b",
-      externalLlm: Boolean(process.env.ASSISTANT_LLM_URL && process.env.ASSISTANT_LLM_KEY),
+      ollama: health.online && health.modelAvailable,
+      ollamaServer: health.online,
+      modelAvailable: health.modelAvailable,
+      model: health.model,
+      models: health.models,
+      externalLlm: Boolean(
+        process.env.ASSISTANT_LLM_URL &&
+        process.env.ASSISTANT_LLM_KEY
+      ),
     });
   })
 );

@@ -7,7 +7,6 @@ import { config } from "../config.js";
 import { requireAuth, isAdmin } from "../lib/auth.js";
 import { asyncHandler, badRequest } from "../lib/errors.js";
 import { savePrivateVerificationDocument } from "../lib/private-verification-documents.js";
-import { startExpurrModerationWorker } from "../lib/expurr-moderation-worker.js";
 
 export const uploadsRouter = Router();
 
@@ -52,9 +51,6 @@ const moderationIncoming = path.join(privateRoot, "moderation-incoming");
 const moderationQueueDirectory = path.join(privateRoot, "moderation");
 fs.mkdirSync(moderationQueueDirectory, { recursive: true, mode: 0o700 });
 
-const moderationWorker = startExpurrModerationWorker({
-  quarantineDirectory: moderationQueueDirectory,
-});
 fs.mkdirSync(moderationIncoming, { recursive: true, mode: 0o700 });
 
 // Limity per typ (Moduł 2): zdjęcia 10 MB, wideo 100 MB (Reels), audio 20 MB.
@@ -75,7 +71,7 @@ const MIME_EXT = {
   "audio/mpeg": ".mp3",
   "audio/wav": ".wav",
   "audio/ogg": ".ogg",
-  "audio/webm": ".webm",
+  "audio/webm": ".weba",
   "audio/mp4": ".m4a",
 };
 
@@ -237,6 +233,39 @@ function findFile(name) {
   }
   return null;
 }
+
+
+/**
+ * Odczyt publicznego obrazu do analizy po zgłoszeniu.
+ * Nie udostępnia ścieżki pliku klientowi.
+ */
+export function readPublicUploadForModeration(name) {
+  const requested = String(name || "");
+  const safeName = path.basename(requested);
+
+  if (!safeName || safeName !== requested) return null;
+
+  const file = findFile(safeName);
+  if (!file) return null;
+
+  try {
+    const stat = fs.statSync(file);
+    if (!stat.isFile() || stat.size <= 0 || stat.size > 10 * 1024 * 1024) {
+      return null;
+    }
+
+    const mimeType = EXT_TYPE[path.extname(file).toLowerCase()];
+    if (!mimeType || !mimeType.startsWith("image/")) return null;
+
+    return {
+      buffer: fs.readFileSync(file),
+      mimeType,
+    };
+  } catch {
+    return null;
+  }
+}
+
 
 /**
  * GET/HEAD /api/uploads/file/:name — obsługa HTTP Range (206 Partial Content),
@@ -541,48 +570,32 @@ uploadsRouter.post(
       throw badRequest("Zawartość pliku nie odpowiada deklarowanemu formatowi");
     }
 
-    if (category === "video") {
+    // Publikacja po walidacji, bez automatycznej moderacji AI.
+    const safeName = path.basename(req.file.filename);
+
+    if (!safeName || safeName !== req.file.filename) {
       cleanup();
-      return res.status(503).json({
-        error: {
-          message: "Film nie został opublikowany. Moderacja klatek wideo nie jest jeszcze skonfigurowana.",
-          code: "VIDEO_MODERATION_UNAVAILABLE",
-        },
-      });
+      throw badRequest("Nieprawidłowa nazwa pliku.");
     }
 
-    if (category === "image") {
-      const moderation = await import("../lib/expurr-moderation.js");
-      const quarantineDirectory = path.join(privateRoot, "moderation");
-      let record;
+    const destination = path.join(uploadRoot, safeName);
 
-      try {
-        const buffer = fs.readFileSync(req.file.path);
+    try {
+      fs.mkdirSync(uploadRoot, { recursive: true });
 
-        record = await moderation.quarantineImage({
-          buffer,
-          mimeType: req.file.mimetype,
-          ownerId: String(req.user.id),
-          quarantineDirectory,
-          originalName: req.file.originalname,
-        });
-      } finally {
-        cleanup();
+      if (path.resolve(req.file.path) !== path.resolve(destination)) {
+        if (fs.existsSync(destination)) {
+          throw new Error("Plik o tej nazwie już istnieje.");
+        }
+        fs.renameSync(req.file.path, destination);
       }
-
-      // Analiza odbywa się w tle. Upload nie czeka na odpowiedź Ollamy.
-      moderationWorker.enqueue(record.id);
-
-      return res.status(202).json({
-        status: "processing",
-        moderation_id: record.id,
-        message: "Zdjęcie zapisano w prywatnej kolejce moderacji.",
-      });
+    } catch (error) {
+      cleanup();
+      throw error;
     }
 
-    // Audio pozostaje przy dotychczasowym mechanizmie.
     const base = config.publicBaseUrl.replace(/\/$/, "");
-    const url = `${base}/api/uploads/file/${req.file.filename}`;
+    const url = `${base}/api/uploads/file/${encodeURIComponent(safeName)}`;
 
     return res.status(201).json({
       file_url: url,
@@ -590,6 +603,7 @@ uploadsRouter.post(
       size: req.file.size,
       type: req.file.mimetype,
     });
+
   })
 );
 

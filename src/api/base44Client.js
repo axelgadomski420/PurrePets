@@ -273,6 +273,9 @@ export const functions = {
   moderateListing: (data) => request(`/api/listings/${data.listing_id}/moderate`, { method: "POST", body: {} }),
   askAssistant: (data) => request("/api/assistant/ask", { method: "POST", body: data }),
   aiChat: (data) => request("/api/ai/chat", { method: "POST", body: data }),
+  aiConversations: () => request("/api/ai/conversations"),
+  createAiConversation: () => request("/api/ai/conversations", { method: "POST", body: {} }),
+  aiConversationMessages: (id) => request(`/api/ai/conversations/${encodeURIComponent(id)}/messages`),
   aiHealth: () => request("/api/ai/health"),
   assistantHealth: () => request("/api/assistant/health"),
 };
@@ -362,6 +365,7 @@ export const reportsApi = {
 
 export const adminApi = {
   overview: () => request("/api/admin/overview"),
+  reports: () => request("/api/admin/reports"),
   mediaModeration: () => request("/api/admin/media-moderation"),
   reviewMedia: (id, body) => request(
     `/api/admin/media-moderation/${encodeURIComponent(id)}`,
@@ -508,68 +512,9 @@ export const base44 = {
         const formData = new FormData();
         formData.append("file", file);
 
-        const uploaded = await request("/api/uploads", {
+        return request("/api/uploads", {
           method: "POST",
           formData,
-        });
-
-        if (uploaded?.status !== "processing" || !uploaded?.moderation_id) {
-          return uploaded;
-        }
-
-        const moderationId = encodeURIComponent(uploaded.moderation_id);
-        const deadline = Date.now() + 110000;
-
-        while (Date.now() < deadline) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-
-          const status = await request(
-            `/api/uploads/moderation/${moderationId}`
-          );
-
-          if (
-            status?.status === "published" &&
-            (status.file_url || status.url)
-          ) {
-            return status;
-          }
-
-          if (status?.status === "pending_review") {
-            throw new ApiError(202, {
-              error: {
-                message: status.message || "Zdjęcie oczekuje na ręczną moderację.",
-                code: "MEDIA_PENDING_REVIEW",
-              },
-              moderation_id: moderationId,
-            });
-          }
-
-          if (status?.status === "rejected") {
-            throw new ApiError(422, {
-              error: {
-                message: status.message || "Zdjęcie zostało odrzucone.",
-                code: "MEDIA_REJECTED",
-              },
-              moderation_id: moderationId,
-            });
-          }
-
-          if (status?.status !== "processing") {
-            throw new ApiError(502, {
-              error: {
-                message: "Nieznany status moderacji.",
-                code: "INVALID_MODERATION_STATUS",
-              },
-            });
-          }
-        }
-
-        throw new ApiError(408, {
-          error: {
-            message: "Moderacja nadal trwa. Zdjęcie nie zostało opublikowane.",
-            code: "MEDIA_PROCESSING_TIMEOUT",
-          },
-          moderation_id: moderationId,
         });
       },
       async UploadPrivateVerificationDocument({ file }) {
