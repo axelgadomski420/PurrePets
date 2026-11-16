@@ -390,6 +390,12 @@ export const profileApi = {
   update: (body) => request("/api/profile/me", { method: "PATCH", body }),
 };
 
+// RODO: eksport danych (art. 15/20) i usunięcie konta (art. 17)
+export const privacyApi = {
+  exportData: () => request("/api/privacy/export"),
+  deleteAccount: () => request("/api/privacy/delete-account", { method: "POST", body: {} }),
+};
+
 // Rozszerzenia messagesApi: wskaźnik „pisze…”
 export const typingApi = {
   signal: (conversationId) => request(\`/api/messages/typing/\${conversationId}\`, { method: "POST", body: {} }),
@@ -429,6 +435,7 @@ export const base44 = {
   stories: storiesApi,
   profile: profileApi,
   pets: petsApi,
+  privacy: privacyApi,
   admin: adminApi,
   billing,
   entities,

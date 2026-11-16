@@ -25,6 +25,7 @@ import { e2eRouter } from "./routes/e2e.routes.js";
 import { storiesRouter } from "./routes/stories.routes.js";
 import { profileRouter } from "./routes/profile.routes.js";
 import { petsRouter } from "./routes/pets.routes.js";
+import { privacyRouter } from "./routes/privacy.routes.js";
 import { musicRouter } from "./routes/music.routes.js";
 import { notFoundHandler, errorHandler } from "./lib/errors.js";
 
@@ -121,6 +122,7 @@ export function createApp() {
   app.use("/api/stories", storiesRouter);
   app.use("/api/profile", profileRouter);
   app.use("/api/pets", petsRouter);
+  app.use("/api/privacy", privacyRouter);
   app.use("/api/music", musicRouter);
 
   app.use(proxyFrontend);
