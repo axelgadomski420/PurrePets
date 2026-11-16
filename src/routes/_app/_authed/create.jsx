@@ -1,5 +1,6 @@
 import { useState } from "react";
 import PhotoStudioEditor from "@/components/studio/PhotoStudioEditor";
+import PurreStudio from "@/components/studio/PurreStudio";
 import { exportStudioImage, STUDIO_FORMATS } from "@/lib/purre-studio";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
@@ -79,6 +80,9 @@ function CreatePage() {
   const [postDrafts, setPostDrafts] = useState([]);
   const [editingPhotoIndex, setEditingPhotoIndex] = useState(null);
   const [videoUrl, setVideoUrl] = useState("");
+  const [videoFile, setVideoFile] = useState(null);
+  const [videoCoverUrl, setVideoCoverUrl] = useState("");
+  const [videoStudioOpen, setVideoStudioOpen] = useState(false);
   const [kind, setKind] = useState("sale");
   const [form, setForm] = useState({
     title: "",
@@ -113,6 +117,14 @@ function CreatePage() {
 
     if (videos.length && (videos.length !== 1 || files.length !== 1)) {
       toast.error("Film dodaj osobno, bez zdjęć");
+      return;
+    }
+
+    if (isPost && videos.length === 1) {
+      // Wideo w poście przechodzi przez wspólne PURRE PETS STUDIO (1:1/4:5)
+      // — publikujemy wyłącznie wyeksportowany plik, nigdy oryginał.
+      setVideoFile(videos[0]);
+      setVideoStudioOpen(true);
       return;
     }
 
@@ -180,6 +192,22 @@ function CreatePage() {
     } finally {
       setBusy(false);
     }
+  };
+
+  const handleVideoStudioPublish = async ({ files, coverBlob }) => {
+    const response = await base44.integrations.Core.UploadPublicFile({ file: files[0] });
+    const url = response?.file_url || response?.url;
+    if (!url) throw new Error("Nie udało się przesłać wideo ze Studia.");
+    setVideoUrl(url);
+    if (coverBlob) {
+      const upCover = await base44.integrations.Core.UploadPublicFile({
+        file: new File([coverBlob], "purre-cover.jpg", { type: "image/jpeg" }),
+      });
+      setVideoCoverUrl(upCover?.file_url || upCover?.url || "");
+    }
+    setVideoFile(null);
+    setVideoStudioOpen(false);
+    toast.success("Wideo ze Studia gotowe — uzupełnij opis i opublikuj post");
   };
 
   const selectChoice = (choice) => {
@@ -307,8 +335,8 @@ function CreatePage() {
           city: form.city,
           breed: form.breed,
           caption: form.postCaption,
-          image_url: videoUrl ? "" : (publishedImageUrls[0] || imageUrl),
-          image_urls: videoUrl ? [] : (publishedImageUrls.length ? publishedImageUrls : (imageUrl ? [imageUrl] : [])),
+          image_url: videoUrl ? videoCoverUrl : (publishedImageUrls[0] || imageUrl),
+          image_urls: videoUrl ? (videoCoverUrl ? [videoCoverUrl] : []) : (publishedImageUrls.length ? publishedImageUrls : (imageUrl ? [imageUrl] : [])),
           video_url: videoUrl,
           tags: form.breed ? [form.breed.toLowerCase()] : [],
           likes: 0,
@@ -692,6 +720,16 @@ function CreatePage() {
           </aside>
         </div>
       </div>
+
+      {/* Wideo w poście: wspólne PURRE PETS STUDIO (1:1/4:5) */}
+      <PurreStudio
+        open={videoStudioOpen && !!videoFile}
+        mode="post"
+        initialFiles={videoFile ? [videoFile] : []}
+        publishLabel="Użyj wideo w poście"
+        onClose={() => { setVideoStudioOpen(false); setVideoFile(null); }}
+        onPublish={handleVideoStudioPublish}
+      />
     </div>
   );
 }
