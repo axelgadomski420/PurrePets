@@ -295,10 +295,60 @@ export function renderStudioFrame(media, canvas, options = {}) {
     \`saturate(\${saturation}%)\`,
   ].filter(Boolean);
 
-  context.filter = filterParts.join(" ") || "none";
+  // Temperatura (ciepło/zimno) i rozmycie — dodatkowe korekcje obrazu.
+  const temperature = clamp(options.temperature ?? 0, -100, 100);
+  const blurPx = clamp(options.blur ?? 0, 0, 20);
+  const extraParts = [];
+  if (temperature !== 0) {
+    extraParts.push("hue-rotate(" + (temperature * 0.18).toFixed(1) + "deg)");
+    if (temperature > 0) extraParts.push("sepia(" + (temperature / 400).toFixed(3) + ")");
+  }
+  if (blurPx > 0) extraParts.push("blur(" + blurPx.toFixed(1) + "px)");
+  context.filter = [...filterParts, ...extraParts].join(" ") || "none";
 
   drawCover(context, media, width, height, options);
   context.restore();
+
+  // Efekty: winieta + ziarno (po medium, przed warstwami tekstu).
+  const vignette = clamp(options.vignette ?? 0, 0, 100);
+  if (vignette > 0) {
+    const gradient = context.createRadialGradient(
+      width / 2, height / 2, Math.min(width, height) * 0.35,
+      width / 2, height / 2, Math.max(width, height) * 0.72
+    );
+    gradient.addColorStop(0, "rgba(0,0,0,0)");
+    gradient.addColorStop(1, "rgba(0,0,0," + (vignette / 100 * 0.85).toFixed(3) + ")");
+    context.fillStyle = gradient;
+    context.fillRect(0, 0, width, height);
+  }
+  const grain = clamp(options.grain ?? 0, 0, 100);
+  if (grain > 0 && typeof document !== "undefined") {
+    const tile = 64;
+    const noise = document.createElement("canvas");
+    noise.width = tile;
+    noise.height = tile;
+    const nctx = noise.getContext("2d");
+    const imageData = nctx.createImageData(tile, tile);
+    const strength = grain / 100 * 90;
+    for (let i = 0; i < imageData.data.length; i += 4) {
+      const value = 128 + Math.round(Math.sin(i * 12.9898) * strength);
+      imageData.data[i] = value;
+      imageData.data[i + 1] = value;
+      imageData.data[i + 2] = value;
+      imageData.data[i + 3] = Math.round(grain * 1.6);
+    }
+    nctx.putImageData(imageData, 0, 0);
+    const pattern = context.createPattern(noise, "repeat");
+    if (pattern) {
+      context.save();
+      context.globalAlpha = 0.5;
+      context.fillStyle = pattern;
+      context.fillRect(0, 0, width, height);
+      context.restore();
+    }
+    noise.width = 1;
+    noise.height = 1;
+  }
 
   // Zachowanie zgodności ze starszymi projektami.
   if (options.text) {
