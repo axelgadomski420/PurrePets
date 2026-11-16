@@ -8,9 +8,9 @@ name: CI
 
 on:
   push:
-    branches: [fix/production-node-deployment, feature/node-nitro-migration]
+    branches: [main]
   pull_request:
-    branches: [fix/production-node-deployment, feature/node-nitro-migration]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -43,7 +43,7 @@ jobs:
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add package-lock.json
             git commit -m "chore: regenerate package-lock.json (CI, Node 22, bez --force)"
-            git push origin HEAD:fix/production-node-deployment
+            git push origin HEAD:${{ github.ref_name }}
           else
             echo "Lockfile zgodny z package.json — bez zmian."
           fi
@@ -77,8 +77,6 @@ jobs:
       # HEAD gałęzi (nie github.sha): zawiera commit z lockfile wygenerowany wyżej,
       # bo push przez GITHUB_TOKEN nie uruchamia kolejnego workflow.
       - uses: actions/checkout@v4
-        with:
-          ref: fix/production-node-deployment
       - uses: actions/setup-node@v4
         with:
           node-version: 22
