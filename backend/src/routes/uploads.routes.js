@@ -110,7 +110,18 @@ const upload = multer({
   storage,
   limits: { fileSize: VIDEO_LIMIT, files: 1 },
   fileFilter: (_req, file, cb) => {
-    if (!ALLOWED.has(file.mimetype)) return cb(badRequest(`Nieobsługiwany typ pliku: ${file.mimetype}`));
+    const originalMime = String(file.mimetype || "");
+    const normalizedMime = originalMime
+      .split(";")[0]
+      .trim()
+      .toLowerCase();
+
+    if (!ALLOWED.has(normalizedMime)) {
+      return cb(badRequest(`Nieobsługiwany typ pliku: ${originalMime}`));
+    }
+
+    // Dalsze etapy Multer używają już kanonicznego MIME.
+    file.mimetype = normalizedMime;
     cb(null, true);
   },
 });
@@ -507,32 +518,119 @@ uploadsRouter.post(
   })
 );
 
-// GET /api/uploads/private/:userId/:name — tylko właściciel lub admin; brak publicznego cache.
-uploadsRouter.get("/private/:userId/:name", requireAuth, (req, res) => {
-  if (req.user.id !== req.params.userId && !isAdmin(req)) {
-    return res.status(403).json({ error: { message: "Brak dostępu do dokumentu", code: "FORBIDDEN" } });
+// Prywatny plik: dostęp wyłącznie dla właściciela lub administratora.
+// Nagłówki cache ustawiamy przed autoryzacją, również dla odpowiedzi błędów.
+uploadsRouter.get(
+  "/private/:userId/:name",
+  (req, res, next) => {
+    res.setHeader("Cache-Control", "private, no-store, no-cache, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    res.setHeader("Vary", "Authorization");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    next();
+  },
+  requireAuth,
+  (req, res) => {
+    const requestedUserId = String(req.params.userId || "");
+    const safe = String(req.params.name || "");
+
+    if (req.user.id !== requestedUserId && !isAdmin(req)) {
+      return res.status(403).json({
+        error: { message: "Brak dostępu do dokumentu", code: "FORBIDDEN" },
+      });
+    }
+
+    // Parametry URL nie mogą zmieniać katalogu bazowego.
+    if (
+      !requestedUserId ||
+      requestedUserId === "." ||
+      requestedUserId === ".." ||
+      requestedUserId.includes("/") ||
+      requestedUserId.includes("\\\\") ||
+      !safe ||
+      safe !== path.basename(safe) ||
+      safe === "." ||
+      safe === ".." ||
+      safe.includes("\\\\") ||
+      safe.includes("\\0")
+    ) {
+      return res.status(404).json({
+        error: { message: "File not found", code: "NOT_FOUND" },
+      });
+    }
+
+    try {
+      const root = fs.realpathSync(privateRoot);
+      const userDir = path.resolve(root, requestedUserId);
+      const rootPrefix = root.endsWith(path.sep) ? root : root + path.sep;
+
+      if (!userDir.startsWith(rootPrefix)) {
+        return res.status(404).json({
+          error: { message: "File not found", code: "NOT_FOUND" },
+        });
+      }
+
+      const realUserDir = fs.realpathSync(userDir);
+
+      // Odrzucamy katalog użytkownika będący symlinkiem poza privateRoot.
+      if (!realUserDir.startsWith(rootPrefix)) {
+        return res.status(404).json({
+          error: { message: "File not found", code: "NOT_FOUND" },
+        });
+      }
+
+      const candidate = path.resolve(realUserDir, safe);
+      if (!candidate.startsWith(realUserDir + path.sep)) {
+        return res.status(404).json({
+          error: { message: "File not found", code: "NOT_FOUND" },
+        });
+      }
+
+      // lstat nie podąża za symlinkiem — nie udostępniamy dowiązań.
+      const linkStat = fs.lstatSync(candidate);
+      if (linkStat.isSymbolicLink() || !linkStat.isFile()) {
+        return res.status(404).json({
+          error: { message: "File not found", code: "NOT_FOUND" },
+        });
+      }
+
+      const file = fs.realpathSync(candidate);
+      if (!file.startsWith(realUserDir + path.sep)) {
+        return res.status(404).json({
+          error: { message: "File not found", code: "NOT_FOUND" },
+        });
+      }
+
+      const stat = fs.statSync(file);
+      if (!stat.isFile()) {
+        return res.status(404).json({
+          error: { message: "File not found", code: "NOT_FOUND" },
+        });
+      }
+
+      const type =
+        EXT_TYPE[path.extname(file).toLowerCase()] ??
+        (safe.toLowerCase().endsWith(".pdf")
+          ? "application/pdf"
+          : "application/octet-stream");
+
+      res.setHeader("Content-Type", type);
+      res.setHeader("Content-Length", String(stat.size));
+
+      const stream = fs.createReadStream(file);
+      stream.on("error", () => {
+        if (!res.headersSent) res.status(500).end();
+        else res.destroy();
+      });
+      stream.pipe(res);
+    } catch {
+      return res.status(404).json({
+        error: { message: "File not found", code: "NOT_FOUND" },
+      });
+    }
   }
-  const safe = path.basename(req.params.name);
-  if (!safe || safe !== req.params.name || safe.includes("..")) {
-    return res.status(404).json({ error: { message: "File not found", code: "NOT_FOUND" } });
-  }
-  const userDir = path.resolve(privateRoot, req.params.userId);
-  const file = path.resolve(userDir, safe);
-  if (!file.startsWith(userDir + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) {
-    return res.status(404).json({ error: { message: "File not found", code: "NOT_FOUND" } });
-  }
-  const type = EXT_TYPE[path.extname(file).toLowerCase()] ?? (safe.toLowerCase().endsWith(".pdf") ? "application/pdf" : "application/octet-stream");
-  res.setHeader("Cache-Control", "private, no-store");
-  res.setHeader("Content-Type", type);
-  res.setHeader("X-Content-Type-Options", "nosniff");
-  res.setHeader("Content-Length", String(fs.statSync(file).size));
-  const stream = fs.createReadStream(file);
-  stream.on("error", () => {
-    if (!res.headersSent) res.status(500).end();
-    else res.destroy();
-  });
-  stream.pipe(res);
-});
+);
 
 // POST /api/uploads (multipart, pole "file") → { file_url } — z limitem per kategoria.
 uploadsRouter.post(

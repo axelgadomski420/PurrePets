@@ -450,41 +450,129 @@ adminRouter.get(
   })
 );
 
+async function reportTargetOwnerId(report) {
+  let row = null;
+
+  switch (report.target_type) {
+    case "user":
+      return report.target_id;
+
+    case "post":
+      row = await prisma.post.findUnique({
+        where: { id: report.target_id },
+        select: { author_id: true },
+      });
+      return row?.author_id ?? null;
+
+    case "comment":
+      row = await prisma.comment.findUnique({
+        where: { id: report.target_id },
+        select: { author_id: true },
+      });
+      return row?.author_id ?? null;
+
+    case "listing":
+      row = await prisma.listing.findUnique({
+        where: { id: report.target_id },
+        select: { seller_id: true },
+      });
+      return row?.seller_id ?? null;
+
+    case "message":
+      row = await prisma.message.findUnique({
+        where: { id: report.target_id },
+        select: { sender_id: true },
+      });
+      return row?.sender_id ?? null;
+
+    default:
+      return null;
+  }
+}
+
 adminRouter.post(
   "/reports/:id",
   asyncHandler(async (req, res) => {
-    const action = req.body?.action; // "hide" | "warn" | "ban" | "dismiss" | "resolve"
-    const report = await prisma.report.findUnique({ where: { id: req.params.id } });
+    const action = req.body?.action;
+    const allowed = new Set(["hide", "warn", "ban", "dismiss", "resolve"]);
+
+    if (!allowed.has(action)) {
+      throw badRequest("Nieobsługiwana decyzja moderatora.");
+    }
+
+    const report = await prisma.report.findUnique({
+      where: { id: req.params.id },
+    });
+
     if (!report) throw notFound("Nie znaleziono zgłoszenia");
+    if (report.status !== "open") {
+      throw badRequest("To zgłoszenie zostało już rozpatrzone.");
+    }
 
     if (action === "hide") {
-      if (report.target_type === "post") await prisma.post.update({ where: { id: report.target_id }, data: { status: "hidden" } }).catch(() => {});
-      if (report.target_type === "comment") await prisma.comment.update({ where: { id: report.target_id }, data: { status: "hidden" } }).catch(() => {});
-      if (report.target_type === "listing") await prisma.listing.update({ where: { id: report.target_id }, data: { status: "archived" } }).catch(() => {});
+      if (report.target_type === "post") {
+        await prisma.post.update({
+          where: { id: report.target_id },
+          data: { status: "hidden" },
+        });
+      } else if (report.target_type === "comment") {
+        await prisma.comment.update({
+          where: { id: report.target_id },
+          data: { status: "hidden" },
+        });
+      } else if (report.target_type === "listing") {
+        await prisma.listing.update({
+          where: { id: report.target_id },
+          data: { status: "archived" },
+        });
+      } else {
+        throw badRequest("Tego rodzaju zgłoszenia nie można ukryć.");
+      }
     }
-    if (action === "warn" && report.target_id) {
-      const targetUserId = report.target_type === "post"
-        ? (await prisma.post.findUnique({ where: { id: report.target_id } }))?.author_id
-        : report.target_id;
-      if (targetUserId) {
+
+    if (action === "warn" || action === "ban") {
+      if (action === "ban" && !isAdminAccount(req)) {
+        throw forbidden(
+          "Blokowanie kont zarezerwowane dla administratora głównego"
+        );
+      }
+
+      const targetUserId = await reportTargetOwnerId(report);
+
+      if (!targetUserId) {
+        throw notFound("Nie udało się ustalić właściciela zgłoszonej treści.");
+      }
+
+      if (action === "warn") {
         await notify(targetUserId, {
           type: "moderation",
           title: "Ostrzeżenie od moderatora",
-          body: req.body?.message || "Twoja treść narusza regulamin serwisu.",
+          body: typeof req.body?.message === "string"
+            ? req.body.message.slice(0, 500)
+            : "Twoja treść wymaga uwagi moderatora.",
+        });
+      }
+
+      if (action === "ban") {
+        await prisma.user.update({
+          where: { id: targetUserId },
+          data: { banned: true },
         });
       }
     }
-    if (action === "ban") {
-      if (!isAdminAccount(req)) throw forbidden("Blokowanie kont zarezerwowane dla administratora głównego");
-      const userId = report.target_type === "user" ? report.target_id
-        : (await prisma.post.findUnique({ where: { id: report.target_id } }))?.author_id;
-      if (userId) await prisma.user.update({ where: { id: userId }, data: { banned: true } });
-    }
+
     const status = action === "dismiss" ? "dismissed" : "resolved";
+
     const updated = await prisma.report.update({
       where: { id: report.id },
-      data: { status, resolution: String(req.body?.resolution ?? action ?? "").slice(0, 300) },
+      data: {
+        status,
+        resolution: String(
+          req.body?.resolution ?? action
+        ).slice(0, 300),
+      },
     });
+
     res.json(updated);
   })
 );
@@ -557,11 +645,17 @@ async function analyzeReportedContent(report) {
   try {
     let text = "";
     let imageCandidates = [];
+    let videoCandidates = [];
 
     if (report.target_type === "post") {
       const item = await prisma.post.findUnique({
         where: { id: report.target_id },
-        select: { caption: true, image_url: true, image_urls: true },
+        select: {
+          caption: true,
+          image_url: true,
+          image_urls: true,
+          video_url: true,
+        },
       });
 
       if (!item) {
@@ -572,11 +666,17 @@ async function analyzeReportedContent(report) {
           ...(item.image_url ? [item.image_url] : []),
           ...reportImageList(item.image_urls),
         ];
+        videoCandidates = item.video_url ? [item.video_url] : [];
       }
     } else if (report.target_type === "listing") {
       const item = await prisma.listing.findUnique({
         where: { id: report.target_id },
-        select: { title: true, description: true, image_urls: true },
+        select: {
+          title: true,
+          description: true,
+          image_urls: true,
+          video_urls: true,
+        },
       });
 
       if (!item) {
@@ -587,6 +687,7 @@ async function analyzeReportedContent(report) {
           .filter(Boolean)
           .join("\n");
         imageCandidates = reportImageList(item.image_urls);
+        videoCandidates = reportImageList(item.video_urls);
       }
     } else if (report.target_type === "comment") {
       const item = await prisma.comment.findUnique({
@@ -618,8 +719,14 @@ async function analyzeReportedContent(report) {
         analysis.media_note = "Wiadomość szyfrowana E2E — analiza treści pominięta.";
       } else {
         text = reportTextValue(item.content);
-        if (item.media_type && String(item.media_type).startsWith("image/")) {
+        const mediaType = String(item.media_type || "").toLowerCase();
+
+        if (mediaType === "image" || mediaType.startsWith("image/")) {
           imageCandidates = item.media_url ? [item.media_url] : [];
+        }
+
+        if (mediaType === "video" || mediaType.startsWith("video/")) {
+          videoCandidates = item.media_url ? [item.media_url] : [];
         }
       }
     }
@@ -667,11 +774,12 @@ async function analyzeReportedContent(report) {
     }
 
     if (
-      imageCandidates.some((item) =>
-        typeof item === "string" && /\.(mp4|webm|mov|m4v)(?:$|[?#])/i.test(item)
+      videoCandidates.some((item) =>
+        typeof item === "string" && item.trim()
       )
     ) {
-      analysis.media_note = "Wideo wymaga osobnej analizy klatek — obecny moduł analizuje obrazy.";
+      analysis.media_note =
+        "Wideo wymaga osobnej analizy klatek — obecny moduł analizuje obrazy.";
     }
   } catch (error) {
     analysis.status = "analysis_error";
@@ -716,6 +824,35 @@ reportsRouter.post(
     if (!["post", "comment", "listing", "user", "message"].includes(targetType) || !targetId || !reason) {
       throw badRequest("target_type, target_id i reason są wymagane");
     }
+
+    let targetExists = false;
+
+    if (targetType === "post") {
+      targetExists = !!(await prisma.post.findUnique({
+        where: { id: targetId }, select: { id: true },
+      }));
+    } else if (targetType === "comment") {
+      targetExists = !!(await prisma.comment.findUnique({
+        where: { id: targetId }, select: { id: true },
+      }));
+    } else if (targetType === "listing") {
+      targetExists = !!(await prisma.listing.findUnique({
+        where: { id: targetId }, select: { id: true },
+      }));
+    } else if (targetType === "user") {
+      targetExists = !!(await prisma.user.findUnique({
+        where: { id: targetId }, select: { id: true },
+      }));
+    } else if (targetType === "message") {
+      targetExists = !!(await prisma.message.findUnique({
+        where: { id: targetId }, select: { id: true },
+      }));
+    }
+
+    if (!targetExists) {
+      throw notFound("Nie znaleziono zgłaszanej treści.");
+    }
+
     const report = await prisma.report.create({
       data: {
         reporter_id: req.user.id,

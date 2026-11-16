@@ -277,6 +277,7 @@ export const functions = {
   createAiConversation: () => request("/api/ai/conversations", { method: "POST", body: {} }),
   aiConversationMessages: (id) => request(`/api/ai/conversations/${encodeURIComponent(id)}/messages`),
   aiHealth: () => request("/api/ai/health"),
+  nearbyVets: (body) => request("/api/ai/vets/nearby", { method: "POST", body }),
   assistantHealth: () => request("/api/assistant/health"),
 };
 
@@ -414,6 +415,7 @@ export const petsApi = {
   addCaregiver: (id, body) => request(`/api/pets/${encodeURIComponent(id)}/caregivers`, { method: "POST", body }),
   removeCaregiver: (id, userId) => request(`/api/pets/${encodeURIComponent(id)}/caregivers/${encodeURIComponent(userId)}`, { method: "DELETE" }),
   upcomingReminders: () => request("/api/pets/reminders/upcoming"),
+  syncReminders: () => request("/api/pets/reminders/sync", { method: "POST", body: {} }),
 };
 
 // ---------------------------------------------------------------- Public client

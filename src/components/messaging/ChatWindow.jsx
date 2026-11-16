@@ -269,8 +269,15 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
           return;
         }
 
-        const type = recorder.mimeType || "audio/webm";
-        const extension = type.includes("mp4") ? "m4a" : "webm";
+        const recordedType = recorder.mimeType || "audio/webm";
+        const type = recordedType.split(";")[0].trim().toLowerCase();
+        const extension = type === "audio/mp4" ? "m4a" : "webm";
+
+        if (!["audio/webm", "audio/mp4"].includes(type)) {
+          toast.error("Przeglądarka utworzyła nieobsługiwany format nagrania.");
+          return;
+        }
+
         const blob = new Blob(chunks, { type });
         const file = new File(
           [blob],

@@ -23,10 +23,51 @@ function normalize(value) {
     .trim();
 }
 
+// Grupy synonimów pomagają odnaleźć wiedzę także wtedy,
+// gdy opiekun używa potocznego określenia zamiast terminu źródłowego.
+const SYNONYM_GROUPS = [
+  ["karma", "karmienie", "zywienie", "dieta", "pokarm", "posilek", "jedzenie", "food", "nutrition"],
+  ["nadwaga", "otylosc", "waga", "odchudzanie", "kalorie", "kondycja"],
+  ["alergia", "nietolerancja", "swedzenie", "drapanie", "eliminacyjna"],
+  ["brzuch", "jelita", "trawienie", "biegunka", "wymioty", "stolec", "kupka"],
+  ["behawior", "zachowanie", "psychika", "emocje", "problem", "problemy"],
+  ["lek", "strach", "panika", "niepokoj", "stres", "fobia"],
+  ["agresja", "warczenie", "gryzienie", "atakowanie", "reaktywnosc"],
+  ["szczekanie", "wycie", "miauczenie", "halas", "wokalizacja"],
+  ["kuweta", "sikanie", "mocz", "znaczenie", "zalatwianie"],
+  ["drapanie", "drapak", "niszczenie", "gryzienie", "zabawa"],
+  ["szczeniak", "szczenieta", "mlody", "miot", "rozwoj"],
+  ["kocie", "kociak", "kocieta", "mlody", "miot", "rozwoj"],
+  ["szczepienie", "szczepienia", "profilaktyka", "odpornosc"],
+  ["pasozyt", "pasozyty", "pchly", "kleszcze", "odrobaczanie"],
+  ["bol", "bolesnosc", "kulawizna", "dyskomfort", "uraz"],
+  ["weterynarz", "weterynaryjny", "lekarz", "lecznica", "klinika", "badanie"],
+];
+
+const SYNONYM_LOOKUP = new Map();
+for (const group of SYNONYM_GROUPS) {
+  for (const term of group) {
+    SYNONYM_LOOKUP.set(term, group);
+  }
+}
+
 function words(value) {
-  return normalize(value)
+  const base = normalize(value)
     .split(/\s+/)
     .filter((word) => word.length >= 3 && !STOP_WORDS.has(word));
+
+  const expanded = new Set(base);
+
+  for (const word of base) {
+    const group = SYNONYM_LOOKUP.get(word) || [];
+    for (const synonym of group) {
+      if (synonym.length >= 3 && !STOP_WORDS.has(synonym)) {
+        expanded.add(synonym);
+      }
+    }
+  }
+
+  return [...expanded];
 }
 
 function extractTitle(content, filename) {
@@ -37,11 +78,13 @@ function extractTitle(content, filename) {
 function scoreDocument(queryWords, query, filename, content) {
   const normalizedContent = normalize(content);
   const normalizedFilename = normalize(filename);
-  const headings = content
-    .split("\n")
-    .filter((line) => /^#{1,4}\s+/.test(line))
-    .map(normalize)
-    .join(" ");
+  const headings = new Set(
+    content
+      .split("\n")
+      .filter((line) => /^#{1,4}\s+/.test(line))
+      .flatMap((line) => normalize(line).split(/\s+/))
+  );
+  const filenameWords = new Set(normalize(filename).split(/\s+/));
 
   let score = 0;
 
@@ -53,8 +96,8 @@ function scoreDocument(queryWords, query, filename, content) {
     const frequency = matches?.length || 0;
 
     if (frequency) score += Math.min(frequency, 5);
-    if (headings.includes(word)) score += 4;
-    if (normalizedFilename.includes(word)) score += 5;
+    if (headings.has(word)) score += 4;
+    if (filenameWords.has(word)) score += 5;
   }
 
   if (query.length >= 12 && normalizedContent.includes(query)) {
@@ -73,10 +116,11 @@ function relevantParagraphs(content, queryWords) {
   return paragraphs
     .map((paragraph, index) => {
       const normalized = normalize(paragraph);
+      const paragraphWords = new Set(normalized.split(/\s+/));
       let score = 0;
 
       for (const word of queryWords) {
-        if (normalized.includes(word)) score += 1;
+        if (paragraphWords.has(word)) score += 1;
       }
 
       if (/^#{1,4}\s/.test(paragraph)) score += 0.5;

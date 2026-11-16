@@ -262,10 +262,15 @@ export default function ProfileView({ profileId }) {
         show_stats: form.show_stats,
         show_kennel_data: form.show_kennel_data,
       };
-      if (form.display_name.trim().length >= 2) payload.display_name = form.display_name.trim();
-      if (form.kennel_name.trim()) payload.kennel_name = form.kennel_name.trim();
-      if (form.bio.trim()) payload.bio = form.bio.trim();
-      if (form.city.trim()) payload.city = form.city.trim();
+      if (form.display_name.trim().length >= 2) {
+        payload.display_name = form.display_name.trim();
+      }
+
+      // Puste wartości również wysyłamy — umożliwia to
+      // wyczyszczenie wcześniej zapisanych danych profilu.
+      payload.kennel_name = form.kennel_name.trim();
+      payload.bio = form.bio.trim();
+      payload.city = form.city.trim();
       await profileApi.update(payload);
       toast.success("Profil zapisany");
       setEditing(false);

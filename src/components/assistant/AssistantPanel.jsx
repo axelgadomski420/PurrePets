@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Bot, PawPrint, Send, Sparkles, X } from "lucide-react";
+import { Bot, MapPin, Navigation, PawPrint, Phone, Send, Sparkles, Stethoscope, X } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
 import { cn } from "@/lib/utils";
@@ -34,6 +34,11 @@ export default function AssistantPanel() {
   const [health, setHealth] = useState(null);
   const [conversationId, setConversationId] = useState("");
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [vetLoading, setVetLoading] = useState(false);
+  const [vetResults, setVetResults] = useState([]);
+  const [vetError, setVetError] = useState("");
+  const [vetSearchUrl, setVetSearchUrl] = useState("");
+  const [vetRadius, setVetRadius] = useState("15");
   const endRef = useRef(null);
 
   useEffect(() => {
@@ -187,6 +192,74 @@ export default function AssistantPanel() {
     }
   };
 
+
+  const findNearbyVets = async () => {
+    if (!isAuthenticated) {
+      navigateToLogin();
+      return;
+    }
+
+    if (!navigator.geolocation) {
+      setVetError("Ta przeglądarka nie udostępnia GPS.");
+      return;
+    }
+
+    setVetLoading(true);
+    setVetError("");
+    setVetResults([]);
+    setVetSearchUrl("");
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const result = await base44.functions.nearbyVets({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            radiusKm: Number(vetRadius),
+          });
+
+          setVetResults(result?.items ?? []);
+          setVetSearchUrl(result?.search_url ?? "");
+
+          if (!result?.items?.length) {
+            setVetError(
+              "Nie znaleziono oznaczonych lecznic w OpenStreetMap w tym promieniu. Możesz sprawdzić Mapy Google."
+            );
+          }
+        } catch (error) {
+          setVetError(
+            error?.message ||
+            "Nie udało się wyszukać lecznic. Spróbuj ponownie."
+          );
+
+          if (error?.data?.search_url) {
+            setVetSearchUrl(error.data.search_url);
+          }
+        } finally {
+          setVetLoading(false);
+        }
+      },
+      (error) => {
+        const messages = {
+          1: "Nie udzielono zgody na lokalizację. Zezwól na GPS, aby znaleźć lecznice.",
+          2: "Nie udało się ustalić lokalizacji urządzenia.",
+          3: "Odczyt GPS trwał zbyt długo. Spróbuj ponownie.",
+        };
+
+        setVetError(
+          messages[error?.code] ||
+          "Nie udało się odczytać lokalizacji."
+        );
+        setVetLoading(false);
+      },
+      {
+        enableHighAccuracy: false,
+        timeout: 12000,
+        maximumAge: 60000,
+      }
+    );
+  };
+
   return (
     <>
       <button
@@ -224,7 +297,128 @@ export default function AssistantPanel() {
             </button>
           </div>
 
-          <div className="flex-1 space-y-3 overflow-y-auto px-3 py-3">
+          <section className="min-w-0 space-y-2 border-b border-border/40 p-2">
+            <div className="flex min-w-0 gap-2">
+              <button
+                type="button"
+                onClick={findNearbyVets}
+                disabled={vetLoading}
+                className="inline-flex min-h-10 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border border-aura/40 bg-aura/10 px-2 text-xs font-semibold text-foreground disabled:opacity-50"
+              >
+                <Stethoscope className="h-4 w-4 shrink-0 text-aura" />
+                <span className="truncate">
+                  {vetLoading ? "Szukam lecznic…" : "Weterynarze w pobliżu"}
+                </span>
+              </button>
+
+              <select
+                aria-label="Promień wyszukiwania lecznic"
+                value={vetRadius}
+                onChange={(event) => setVetRadius(event.target.value)}
+                className="min-h-10 w-[82px] shrink-0 rounded-xl border border-border/60 bg-background px-2 text-xs"
+              >
+                <option value="5">5 km</option>
+                <option value="10">10 km</option>
+                <option value="15">15 km</option>
+                <option value="20">20 km</option>
+                <option value="30">30 km</option>
+              </select>
+            </div>
+
+            {vetError && (
+              <p className="break-words text-[11px] text-muted-foreground">
+                {vetError}
+              </p>
+            )}
+
+            {vetResults.length > 0 && (
+              <div className="max-h-40 space-y-2 overflow-y-auto">
+                {vetResults.map((vet) => (
+                  <article
+                    key={vet.id}
+                    className="min-w-0 rounded-xl border border-border/60 bg-secondary/30 p-2.5"
+                  >
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="break-words text-xs font-semibold text-foreground">
+                          {vet.name}
+                        </p>
+                        <p className="mt-1 text-[10px] text-muted-foreground">
+                          <MapPin className="mr-1 inline h-3 w-3" />
+                          {vet.distance_km} km
+                          {vet.address ? " · " + vet.address : ""}
+                        </p>
+                      </div>
+                      {vet.emergency && (
+                        <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-1 text-[9px] font-semibold text-amber-700">
+                          24 h
+                        </span>
+                      )}
+                    </div>
+
+                    {vet.opening_hours && (
+                      <p className="mt-1 break-words text-[10px] text-muted-foreground">
+                        Godziny: {vet.opening_hours}
+                      </p>
+                    )}
+
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {vet.phone && (
+                        <a
+                          href={"tel:" + vet.phone}
+                          className="inline-flex min-h-9 items-center gap-1 rounded-lg border border-border/60 px-2.5 text-[10px] font-medium"
+                        >
+                          <Phone className="h-3 w-3" />
+                          Zadzwoń
+                        </a>
+                      )}
+
+                      <a
+                        href={vet.maps_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex min-h-9 items-center gap-1 rounded-lg bg-aura/15 px-2.5 text-[10px] font-semibold text-foreground"
+                      >
+                        <Navigation className="h-3 w-3" />
+                        Nawiguj
+                      </a>
+
+                      {vet.website && (
+                        <a
+                          href={vet.website}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex min-h-9 items-center rounded-lg border border-border/60 px-2.5 text-[10px]"
+                        >
+                          Strona
+                        </a>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+
+            {vetSearchUrl && (
+              <a
+                href={vetSearchUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex min-h-9 items-center gap-1 text-[10px] font-medium text-aura underline underline-offset-2"
+              >
+                <Navigation className="h-3 w-3" />
+                Otwórz wszystkie wyniki w Mapach Google
+              </a>
+            )}
+
+            <p className="text-[9px] leading-relaxed text-muted-foreground">
+              Lokalizacja jest pobierana wyłącznie po kliknięciu. Wyniki pochodzą
+              z OpenStreetMap i mogą być niekompletne — zadzwoń do lecznicy,
+              aby potwierdzić dyżur i dostępność.
+            </p>
+          </section>
+
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-3 py-3">
             {messages.map((msg, i) => (
               <div
                 key={i}

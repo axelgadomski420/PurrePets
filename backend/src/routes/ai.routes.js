@@ -162,6 +162,271 @@ router.get("/conversations/:id/messages", requireAuth, asyncHandler(async (req, 
   });
 }));
 
+
+// Wyszukiwanie lecznic weterynaryjnych w OpenStreetMap.
+// GPS jest przekazywany wyłącznie na czas zapytania.
+// Nie zapisujemy współrzędnych w bazie ani w historii Expurr.
+
+const vetSearchSchema = z.object({
+  latitude: z.number().finite().min(-90).max(90),
+  longitude: z.number().finite().min(-180).max(180),
+  radiusKm: z.number().int().min(5).max(30).default(15),
+});
+
+const vetSearchCache = new Map();
+const vetUserRequests = new Map();
+
+let overpassQueue = Promise.resolve();
+let lastOverpassRequest = 0;
+
+function distanceBetweenKm(lat1, lon1, lat2, lon2) {
+  const rad = (value) => value * Math.PI / 180;
+  const earthRadius = 6371;
+
+  const dLat = rad(lat2 - lat1);
+  const dLon = rad(lon2 - lon1);
+
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(rad(lat1)) *
+    Math.cos(rad(lat2)) *
+    Math.sin(dLon / 2) ** 2;
+
+  return 2 * earthRadius * Math.atan2(
+    Math.sqrt(a),
+    Math.sqrt(1 - a)
+  );
+}
+
+async function queryOverpass(query) {
+  const run = async () => {
+    const wait = 1100 - (Date.now() - lastOverpassRequest);
+
+    if (wait > 0) {
+      await new Promise((resolve) => setTimeout(resolve, wait));
+    }
+
+    lastOverpassRequest = Date.now();
+
+    const response = await fetch(
+      "https://overpass-api.de/api/interpreter",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "User-Agent": "PURRE-PETS/1.0 (+https://purrepets.pl)",
+        },
+        body: new URLSearchParams({ data: query }),
+        signal: AbortSignal.timeout(20000),
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error("OpenStreetMap HTTP " + response.status);
+    }
+
+    return response.json();
+  };
+
+  const pending = overpassQueue.then(run, run);
+
+  overpassQueue = pending.then(
+    () => undefined,
+    () => undefined
+  );
+
+  return pending;
+}
+
+router.post(
+  "/vets/nearby",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const parsed = vetSearchSchema.safeParse(req.body ?? {});
+
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "Nieprawidłowe współrzędne lokalizacji.",
+      });
+    }
+
+    const { latitude, longitude, radiusKm } = parsed.data;
+    const userId = req.user.id;
+
+    // Zaokrąglenie do około 100 m pozwala współdzielić cache
+    // bez zapisywania dokładnej lokalizacji użytkownika.
+    const cacheKey = [
+      latitude.toFixed(3),
+      longitude.toFixed(3),
+      radiusKm,
+    ].join(":");
+
+    const cached = vetSearchCache.get(cacheKey);
+
+    if (cached && Date.now() - cached.time < 10 * 60 * 1000) {
+      return res.json({
+        ...cached.payload,
+        cached: true,
+      });
+    }
+
+    const lastRequest = vetUserRequests.get(userId) || 0;
+
+    if (Date.now() - lastRequest < 20000) {
+      return res.status(429).json({
+        error: "Odczekaj chwilę przed kolejnym wyszukiwaniem.",
+      });
+    }
+
+    vetUserRequests.set(userId, Date.now());
+
+    // Wyszukujemy punkty, obiekty i relacje oznaczone
+    // w OpenStreetMap jako amenity=veterinary.
+    const radiusMeters = radiusKm * 1000;
+
+    const query = `
+[out:json][timeout:18];
+(
+  node["amenity"="veterinary"](around:${radiusMeters},${latitude},${longitude});
+  way["amenity"="veterinary"](around:${radiusMeters},${latitude},${longitude});
+  relation["amenity"="veterinary"](around:${radiusMeters},${latitude},${longitude});
+);
+out center tags;
+`;
+
+    try {
+      const data = await queryOverpass(query);
+      const elements = Array.isArray(data?.elements)
+        ? data.elements
+        : [];
+
+      const seen = new Set();
+
+      const items = elements.map((element) => {
+        const tags = element.tags || {};
+        const lat = Number(element.lat ?? element.center?.lat);
+        const lon = Number(element.lon ?? element.center?.lon);
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+          return null;
+        }
+
+        const distance = distanceBetweenKm(
+          latitude,
+          longitude,
+          lat,
+          lon
+        );
+
+        if (distance > radiusKm + 0.1) return null;
+
+        const id = String(element.id);
+
+        if (seen.has(id)) return null;
+        seen.add(id);
+
+        const street = [
+          tags["addr:street"],
+          tags["addr:housenumber"],
+        ].filter(Boolean).join(" ");
+
+        const address = [
+          street,
+          tags["addr:postcode"],
+          tags["addr:city"] || tags["addr:town"] || tags["addr:village"],
+        ].filter(Boolean).join(", ");
+
+        const phone =
+          tags.phone ||
+          tags["contact:phone"] ||
+          null;
+
+        const website =
+          tags.website ||
+          tags["contact:website"] ||
+          null;
+
+        return {
+          id,
+          name:
+            tags.name ||
+            tags["name:pl"] ||
+            "Gabinet weterynaryjny",
+          latitude: lat,
+          longitude: lon,
+          distance_km: Number(distance.toFixed(1)),
+          address: address || tags["addr:full"] || null,
+          phone,
+          website,
+          opening_hours: tags.opening_hours || null,
+          emergency:
+            /24\s*\/?\s*7|24h|całodob/i.test(
+              String(tags.opening_hours || "")
+            ),
+          maps_url:
+            "https://www.google.com/maps/dir/?api=1&destination=" +
+            encodeURIComponent(`${lat},${lon}`),
+          osm_url:
+            "https://www.openstreetmap.org/?mlat=" +
+            encodeURIComponent(lat) +
+            "&mlon=" +
+            encodeURIComponent(lon) +
+            "#map=17/" +
+            encodeURIComponent(lat) +
+            "/" +
+            encodeURIComponent(lon),
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.distance_km - b.distance_km)
+      .slice(0, 25);
+
+      const payload = {
+        items,
+        source: "OpenStreetMap",
+        radius_km: radiusKm,
+        search_url:
+          "https://www.google.com/maps/search/?api=1&query=" +
+          encodeURIComponent(
+            `weterynarz near ${latitude},${longitude}`
+          ),
+      };
+
+      vetSearchCache.set(cacheKey, {
+        time: Date.now(),
+        payload,
+      });
+
+      if (vetSearchCache.size > 150) {
+        const oldest = vetSearchCache.keys().next().value;
+        vetSearchCache.delete(oldest);
+      }
+
+      if (vetUserRequests.size > 5000) {
+        vetUserRequests.clear();
+      }
+
+      return res.json(payload);
+    } catch (error) {
+      console.error(
+        "Expurr: wyszukiwanie lecznic nie powiodło się:",
+        error?.message || error
+      );
+
+      return res.status(503).json({
+        error:
+          "Nie udało się pobrać danych lecznic. Spróbuj ponownie lub otwórz wyszukiwanie w Mapach Google.",
+        search_url:
+          "https://www.google.com/maps/search/?api=1&query=" +
+          encodeURIComponent(
+            `weterynarz near ${latitude},${longitude}`
+          ),
+      });
+    }
+  })
+);
+
+
 // POST /api/ai/chat — asystent PURRE (Ollama). Wymaga logowania (pkt P).
 // Przyjmuje { prompt | message, pet_id? } — pet_id tylko dla WŁAŚCICIELA zwierzaka.
 router.post("/chat", requireAuth, asyncHandler(async (req, res) => {
@@ -190,16 +455,33 @@ router.post("/chat", requireAuth, asyncHandler(async (req, res) => {
   // Natychmiastowa reakcja na rozpoznane objawy alarmowe.
   // Nie czekamy na generowanie odpowiedzi przez lokalny model.
   const emergencyPatterns = [
-    /(?:ma|ma teraz|wystepuje|wystapila|zauwazylem|zauwazylam).{0,35}(?:duszno|trudnosci z oddychaniem)/i,
-    /(?:nie moze|nie jest w stanie|od wielu godzin nie).{0,35}oddac moczu/i,
-    /(?:ma|wystepuja|wystapily).{0,25}drgawk/i,
+    // Oddychanie: duszność, sinienie, krztuszenie i ciężka niewydolność oddechowa.
+    /(?:duszno|trudnosci z oddychaniem|problem z oddychaniem|ciezko oddycha|nie moze oddychac|lapie powietrze|sinieje|sine dziasla|krztusi sie)/i,
+
+    // Układ moczowy: możliwa niedrożność, szczególnie u kocurów.
+    /(?:nie moze|nie jest w stanie|nie potrafi|bezskutecznie probuje).{0,35}(?:oddac moczu|sikac|wysikac sie)/i,
+    /(?:nie oddaje moczu|nie sika|brak moczu|krew w moczu).{0,35}(?:od|przez|od kilku|od wielu)?/i,
+
+    // Układ nerwowy i utrata przytomności.
+    /(?:ma|wystepuja|wystapily|dostaje|dostal|dostala).{0,25}drgawk/i,
     /(?:stracil|stracila|utracil|utracila) przytomnosc/i,
-    /(?:jest|pozostaje) nieprzytomn/i,
-    /(?:silnie|obficie|mocno) krwawi/i,
-    /(?:zjadl|zjadla|polknal|polknela).{0,50}(?:trutk|lek|tablet|trucizn)/i,
-    /podejrzenie zatrucia/i,
-    /(?:nagle|gwaltownie).{0,35}(?:rozdety brzuch|powiekszony brzuch)/i,
-    /(?:komplikacje|powiklania).{0,25}porodow/i,
+    /(?:jest|pozostaje|zostal|zostala) nieprzytomn/i,
+    /(?:nie reaguje|brak reakcji|zemdlal|zemdlala|zapadl w stan)/i,
+
+    // Krwotok i ciężki uraz.
+    /(?:silnie|obficie|mocno|nieustannie) krwawi/i,
+    /(?:krwotok|nieustajace krwawienie|poważny uraz|ciezki uraz|potracil go samochod|potracila go samochod)/i,
+
+    // Zatrucia: leki, chemikalia oraz typowe toksyczne produkty spożywcze.
+    /(?:zjadl|zjadla|polknal|polknela|zjadlo|polknelo|wypil|wypila|ma kontakt z).{0,70}(?:trutk|lek|tablet|trucizn|czekolad|ksylitol|winogron|rodzyn|antyfryz|pestycyd|nikotyn|alkohol|chemikali|detergent)/i,
+    /(?:podejrzenie|objawy|mozliwe) zatrucia/i,
+    /(?:zatrul sie|zatrula sie|zostal otruty|zostala otruta)/i,
+
+    // Nagłe stany chirurgiczne, przegrzanie i poród.
+    /(?:rozdety brzuch|powiekszony brzuch|twardy brzuch|bezskuteczne odruchy wymiotne|probuj[eą] wymiotowac i nie moze)/i,
+    /(?:udar cieplny|przegrzanie|przegrzal sie|przegrzala sie|temperatura ciala bardzo wysoka)/i,
+    /(?:komplikacje|powiklania|problem|problemy|brak postepu).{0,30}porod/i,
+    /(?:silny bol|bardzo silny bol|nagly silny bol|nie moze wstac|nie moze chodzic)/i,
   ];
 
   const normalizedEmergencyText = prompt
@@ -280,7 +562,15 @@ router.post("/chat", requireAuth, asyncHandler(async (req, res) => {
     }
   }
 
-  const knowledge = retrieveExpurrKnowledge(prompt);
+  // Przy pytaniach uzupełniających uwzględniamy ostatnie
+  // pytania użytkownika, ale nie mieszamy odpowiedzi AI z zapytaniem RAG.
+  const knowledgeQuery = historyRows
+    .filter((item) => item.sender_id === req.user.id)
+    .slice(-4)
+    .map((item) => String(item.content ?? "").slice(0, 1000))
+    .join("\n");
+
+  const knowledge = retrieveExpurrKnowledge(knowledgeQuery || prompt);
 
   const system = `Jesteś Expurr — doświadczonym, ciepłym i niezwykle cierpliwym przewodnikiem po świecie psów i kotów w PURRE PETS. Masz sposób tłumaczenia godny stuletniego znawcy zwierząt, ale nigdy nie twierdzisz, że jesteś lekarzem weterynarii.
 

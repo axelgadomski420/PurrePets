@@ -86,9 +86,9 @@ function Field({ label, value }) {
   );
 }
 
-const inputCls = "w-full rounded-xl border border-border/70 bg-card/60 px-3 py-2 text-sm outline-none focus:border-aura/60";
-const btnPrimary = "btn-aura rounded-xl px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] disabled:opacity-60";
-const btnGhost = "rounded-xl border border-border/70 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] disabled:opacity-50";
+const inputCls = "min-h-11 min-w-0 w-full rounded-xl border border-border/70 bg-card/60 px-3 py-2 text-sm outline-none focus:border-aura/60";
+const btnPrimary = "btn-aura inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] disabled:opacity-60";
+const btnGhost = "inline-flex min-h-11 items-center justify-center rounded-xl border border-border/70 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] disabled:opacity-50";
 
 function PetProfilePage() {
   const { id } = useParams({ from: "/_app/pets/$id" });
@@ -214,7 +214,7 @@ function PetProfilePage() {
         </div>
 
         <div className="mt-4">
-          {tab === "card" && <CardTab pet={pet} photos={photos} age={age} isEditor={isEditor} saving={saving} run={run} />}
+          {tab === "card" && <CardTab pet={pet} photos={photos} age={age} health={health} events={events} isEditor={isEditor} saving={saving} run={run} onOpenHealth={() => setTab("health")} onOpenCalendar={() => setTab("calendar")} />}
           {tab === "health" && <HealthTab items={health} isEditor={isEditor} saving={saving} run={run} petId={pet.id} />}
           {tab === "calendar" && <CalendarTab items={events} pet={pet} isEditor={isEditor} saving={saving} run={run} petId={pet.id} />}
           {tab === "weight" && <WeightTab items={measurements} isEditor={isEditor} saving={saving} run={run} petId={pet.id} />}
@@ -225,10 +225,51 @@ function PetProfilePage() {
   );
 }
 
-function CardTab({ pet, photos, age, isEditor, saving, run }) {
+function CardTab({ pet, photos, age, health, events, isEditor, saving, run, onOpenHealth, onOpenCalendar }) {
   const [form, setForm] = useState(null);
   const editing = form !== null;
   const f = form ?? {};
+
+  const preventiveReminders = [
+    ...health
+      .filter((item) =>
+        ["vaccine", "deworming", "flea_tick"].includes(item.kind) &&
+        item.next_date
+      )
+      .map((item) => ({
+        id: "health-" + item.id,
+        title: item.title,
+        kind: item.kind,
+        date: item.next_date,
+      })),
+
+    ...events
+      .filter((item) =>
+        ["vaccine", "deworming"].includes(item.kind) &&
+        !item.done
+      )
+      .map((item) => ({
+        id: "event-" + item.id,
+        title: item.title,
+        kind: item.kind,
+        date: item.date,
+      })),
+  ]
+    .filter((item) => item.date)
+    .sort((a, b) => new Date(a.date) - new Date(b.date))
+    .filter((item, index, list) =>
+      list.findIndex((candidate) =>
+        candidate.title.trim().toLocaleLowerCase("pl") ===
+          item.title.trim().toLocaleLowerCase("pl") &&
+        new Date(candidate.date).toISOString().slice(0, 10) ===
+          new Date(item.date).toISOString().slice(0, 10)
+      ) === index
+    )
+    .slice(0, 4);
+
+  const latestVaccination = health
+    .filter((item) => item.kind === "vaccine" && item.date)
+    .sort((a, b) => new Date(b.date) - new Date(a.date))[0] ?? null;
 
   const facts = [
     pet.species && { label: "Gatunek", value: SPECIES_LABEL[pet.species] ?? pet.species },
@@ -246,7 +287,115 @@ function CardTab({ pet, photos, age, isEditor, saving, run }) {
   ].filter(Boolean);
 
   return (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
+
+      {isEditor && (
+        <section className="min-w-0 space-y-3 rounded-2xl border border-aura/30 bg-aura/5 p-3 sm:p-4">
+
+          <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold">
+                Zdrowie i profilaktyka
+              </h2>
+
+              <p className="text-xs text-muted-foreground">
+                Historia szczepień i najbliższe terminy opieki.
+              </p>
+
+              {latestVaccination && (
+                <p className="mt-1 break-words text-xs text-muted-foreground">
+                  Ostatnie szczepienie: {fmtDate(latestVaccination.date)}
+                  {latestVaccination.next_date
+                    ? " · następny termin: " + fmtDate(latestVaccination.next_date)
+                    : ""}
+                </p>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className={btnGhost}
+                onClick={onOpenHealth}
+              >
+                Zdrowie
+              </button>
+
+              <button
+                type="button"
+                className={btnGhost}
+                onClick={onOpenCalendar}
+              >
+                Kalendarz
+              </button>
+            </div>
+          </div>
+
+          {preventiveReminders.length > 0 ? (
+            <div className="min-w-0 space-y-2">
+              {preventiveReminders.map((item) => {
+                const due = new Date(item.date);
+                const today = new Date();
+
+                due.setHours(0, 0, 0, 0);
+                today.setHours(0, 0, 0, 0);
+
+                const days = Math.round(
+                  (due.getTime() - today.getTime()) /
+                  (24 * 60 * 60 * 1000)
+                );
+
+                const status =
+                  days < 0
+                    ? "Zaległe"
+                    : days === 0
+                      ? "Dzisiaj"
+                      : "Za " + days + " dni";
+
+                return (
+                  <div
+                    key={item.id}
+                    className="flex min-w-0 flex-col gap-1 rounded-xl border border-border/60 bg-card/70 p-3 sm:flex-row sm:items-center sm:justify-between"
+                  >
+                    <div className="min-w-0">
+                      <p className="break-words text-sm font-medium">
+                        {item.title}
+                      </p>
+
+                      <p className="break-words text-xs text-muted-foreground">
+                        {item.kind === "vaccine"
+                          ? "Szczepienie"
+                          : item.kind === "deworming"
+                            ? "Odrobaczanie"
+                            : "Ochrona przeciw pchłom i kleszczom"}
+                        {" · "}
+                        {fmtDate(item.date)}
+                      </p>
+                    </div>
+
+                    <span
+                      className={cn(
+                        "shrink-0 self-start rounded-full px-2.5 py-1 text-xs font-medium sm:self-auto",
+                        days < 0
+                          ? "bg-amber-500/15 text-amber-700"
+                          : "bg-aura/10 text-aura"
+                      )}
+                    >
+                      {status}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Nie zapisano kolejnego terminu szczepienia ani profilaktyki.
+              Dodaj datę w zakładce Zdrowie lub Kalendarz.
+            </p>
+          )}
+        </section>
+      )}
+
       {facts.length > 0 && (
         <div className="flex flex-wrap gap-2">
           {facts.map((item, i) => <Field key={i} label={item.label} value={item.value} />)}

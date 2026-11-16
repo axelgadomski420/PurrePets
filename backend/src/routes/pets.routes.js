@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Router } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma.js";
@@ -130,48 +131,365 @@ petsRouter.get("/mine", requireAuth, asyncHandler(async (req, res) => {
   res.json({ items: [...own, ...sharedPets] });
 }));
 
-// GET /api/pets/reminders/upcoming — przypomnienia ze WSZYSTKICH moich zwierząt (E3/M).
-// Zwraca: wydarzenia w ciągu 7 dni + przeterminowane (nieodhaczone) + urodziny/adopcje w ciągu 14 dni.
-petsRouter.get("/reminders/upcoming", requireAuth, asyncHandler(async (req, res) => {
-  const uid = userIdOf(req);
-  const own = await prisma.pet.findMany({ where: { owner_id: uid }, select: { id: true, name: true, birth_date: true, adoption_date: true } });
-  const caregiver = await prisma.petCaregiver.findMany({ where: { user_id: uid, status: "active" }, select: { pet_id: true } });
-  const petIds = [...new Set([...own.map((p) => p.id), ...caregiver.map((c) => c.pet_id)])];
-  if (!petIds.length) return res.json({ items: [] });
+
+// ---------------------------------------------------------
+// PRZYPOMNIENIA PET — właściciele i aktywni opiekunowie
+// ---------------------------------------------------------
+
+async function collectUpcomingPetReminders(uid) {
+  if (!uid) return [];
+
+  const [owned, caregiverLinks] = await Promise.all([
+    prisma.pet.findMany({
+      where: { owner_id: uid },
+      select: { id: true },
+    }),
+
+    prisma.petCaregiver.findMany({
+      where: {
+        user_id: uid,
+        status: "active",
+      },
+      select: {
+        pet_id: true,
+      },
+    }),
+  ]);
+
+  const petIds = [
+    ...new Set([
+      ...owned.map((pet) => pet.id),
+      ...caregiverLinks.map((item) => item.pet_id),
+    ]),
+  ];
+
+  if (petIds.length === 0) return [];
+
+  const pets = await prisma.pet.findMany({
+    where: {
+      id: { in: petIds },
+    },
+    select: {
+      id: true,
+      name: true,
+      birth_date: true,
+      adoption_date: true,
+    },
+  });
+
+  const petById = new Map(
+    pets.map((pet) => [pet.id, pet])
+  );
 
   const now = new Date();
-  const in7 = new Date(now.getTime() + 7 * 24 * 3600 * 1000);
-  const events = await prisma.petCalendarEvent.findMany({
-    where: { pet_id: { in: petIds }, done: false, date: { lte: in7 } },
-    orderBy: { date: "asc" },
-  });
-  const petName = Object.fromEntries(own.map((p) => [p.id, p.name]));
 
-  const items = events.map((e) => ({
-    ...e,
-    pet_name: petName[e.id] ?? null,
-    overdue: new Date(e.date) < now,
-  }));
+  const in7Days = new Date(
+    now.getTime() + 7 * 24 * 60 * 60 * 1000
+  );
 
-  // Urodziny (rocznica birth_date) i rocznica adopcji — najbliższe wystąpienie.
-  const anniversary = (base, label, petId, petName2) => {
-    if (!base) return null;
-    const b = new Date(base);
-    let next = new Date(now.getFullYear(), b.getMonth(), b.getDate());
-    if (next < new Date(now.toDateString())) next = new Date(now.getFullYear() + 1, b.getMonth(), b.getDate());
-    const diff = (next - now) / (24 * 3600 * 1000);
-    if (diff > 14) return null;
-    return { kind: label, title: `${label === "birthday" ? "Urodziny" : "Rocznica adopcji"}: ${petName2}`, pet_id: petId, pet_name: petName2, date: next.toISOString(), overdue: false };
-  };
-  for (const p of own) {
-    const b = anniversary(p.birth_date, "birthday", p.id, p.name);
-    if (b) items.push(b);
-    const a = anniversary(p.adoption_date, "adoption", p.id, p.name);
-    if (a) items.push(a);
+  const overdueLimit = new Date(
+    now.getTime() - 30 * 24 * 60 * 60 * 1000
+  );
+
+  const [events, healthRecords] = await Promise.all([
+    prisma.petCalendarEvent.findMany({
+      where: {
+        pet_id: { in: petIds },
+        done: false,
+        date: {
+          gte: overdueLimit,
+          lte: in7Days,
+        },
+      },
+      orderBy: {
+        date: "asc",
+      },
+    }),
+
+    prisma.petHealthRecord.findMany({
+      where: {
+        pet_id: { in: petIds },
+        next_date: {
+          not: null,
+          gte: overdueLimit,
+          lte: in7Days,
+        },
+      },
+      orderBy: {
+        next_date: "asc",
+      },
+    }),
+  ]);
+
+  const items = [];
+
+  for (const event of events) {
+    const pet = petById.get(event.pet_id);
+
+    items.push({
+      id: event.id,
+      source: "calendar",
+      kind: event.kind,
+      title: event.title,
+      pet_id: event.pet_id,
+      pet_name: pet?.name ?? null,
+      date: event.date,
+      remind_days_before: event.remind_days_before ?? 3,
+      overdue: new Date(event.date) < now,
+      done: event.done,
+    });
   }
-  items.sort((x, y) => new Date(x.date) - new Date(y.date));
-  res.json({ items: items.slice(0, 30) });
-}));
+
+  for (const record of healthRecords) {
+    const pet = petById.get(record.pet_id);
+
+    items.push({
+      id: record.id,
+      source: "health",
+      kind: record.kind,
+      title: record.title,
+      pet_id: record.pet_id,
+      pet_name: pet?.name ?? null,
+      date: record.next_date,
+      next_date: record.next_date,
+      remind_days_before: 3,
+      overdue: new Date(record.next_date) < now,
+      vet_name: record.vet_name,
+    });
+  }
+
+  // Urodziny i rocznice adopcji.
+  // Termin obliczany jest jako najbliższa przyszła rocznica.
+
+  function anniversary(base, kind, pet) {
+    if (!base) return null;
+
+    const original = new Date(base);
+
+    if (Number.isNaN(original.getTime())) {
+      return null;
+    }
+
+    const today = new Date();
+
+    const todayUtc = Date.UTC(
+      today.getUTCFullYear(),
+      today.getUTCMonth(),
+      today.getUTCDate()
+    );
+
+    let next = new Date(Date.UTC(
+      today.getUTCFullYear(),
+      original.getUTCMonth(),
+      original.getUTCDate()
+    ));
+
+    if (next.getTime() < todayUtc) {
+      next = new Date(Date.UTC(
+        today.getUTCFullYear() + 1,
+        original.getUTCMonth(),
+        original.getUTCDate()
+      ));
+    }
+
+    const days = Math.floor(
+      (next.getTime() - todayUtc) /
+      (24 * 60 * 60 * 1000)
+    );
+
+    if (days > 14) return null;
+
+    return {
+      id:
+        kind +
+        ":" +
+        pet.id +
+        ":" +
+        next.toISOString().slice(0, 10),
+
+      source: "anniversary",
+      kind,
+
+      title:
+        (kind === "birthday"
+          ? "Urodziny: "
+          : "Rocznica adopcji: ") +
+        pet.name,
+
+      pet_id: pet.id,
+      pet_name: pet.name,
+      date: next.toISOString(),
+      remind_days_before: 3,
+      overdue: false,
+    };
+  }
+
+  for (const pet of pets) {
+    const birthday = anniversary(
+      pet.birth_date,
+      "birthday",
+      pet
+    );
+
+    const adoption = anniversary(
+      pet.adoption_date,
+      "adoption",
+      pet
+    );
+
+    if (birthday) items.push(birthday);
+    if (adoption) items.push(adoption);
+  }
+
+  items.sort(
+    (a, b) => new Date(a.date) - new Date(b.date)
+  );
+
+  return items.slice(0, 50);
+}
+
+
+function reminderDaysUntil(value) {
+  const due = new Date(value);
+
+  if (Number.isNaN(due.getTime())) {
+    return Infinity;
+  }
+
+  const today = new Date();
+
+  const dueDay = Date.UTC(
+    due.getUTCFullYear(),
+    due.getUTCMonth(),
+    due.getUTCDate()
+  );
+
+  const todayDay = Date.UTC(
+    today.getUTCFullYear(),
+    today.getUTCMonth(),
+    today.getUTCDate()
+  );
+
+  return Math.round(
+    (dueDay - todayDay) / (24 * 60 * 60 * 1000)
+  );
+}
+
+
+// GET /api/pets/reminders/upcoming
+petsRouter.get(
+  "/reminders/upcoming",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const uid = userIdOf(req);
+
+    const items = await collectUpcomingPetReminders(uid);
+
+    res.json({ items });
+  })
+);
+
+
+// POST /api/pets/reminders/sync
+// Powiadomienia są deduplikowane deterministycznym ID.
+// Nie wymaga migracji bazy danych.
+
+petsRouter.post(
+  "/reminders/sync",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const uid = userIdOf(req);
+
+    const items = await collectUpcomingPetReminders(uid);
+
+    const dueItems = items.filter((item) => {
+      const daysBefore = Number(
+        item.remind_days_before ?? 3
+      );
+
+      if (!Number.isFinite(daysBefore) || daysBefore <= 0) {
+        return false;
+      }
+
+      return reminderDaysUntil(item.date) <= daysBefore;
+    });
+
+    const notifications = dueItems.map((item) => {
+      const dueDate = new Date(item.date)
+        .toISOString()
+        .slice(0, 10);
+
+      const key = [
+        uid,
+        item.source,
+        item.id,
+        dueDate,
+      ].join(":");
+
+      const id =
+        "petrem_" +
+        createHash("sha256")
+          .update(key)
+          .digest("hex")
+          .slice(0, 32);
+
+      const dateLabel = new Date(
+        item.date
+      ).toLocaleDateString("pl-PL");
+
+      return {
+        id,
+        user_id: uid,
+        type: "system",
+
+        title: (
+          "Przypomnienie: " + item.title
+        ).slice(0, 160),
+
+        body: (
+          (item.pet_name || "Zwierzę") +
+          " — termin: " +
+          dateLabel +
+          (item.overdue ? " (po terminie)" : "")
+        ).slice(0, 1000),
+
+        link:
+          "/pets/" +
+          encodeURIComponent(item.pet_id),
+
+        read: false,
+        created_by_id: uid,
+      };
+    });
+
+    // Upsert zamiast createMany(skipDuplicates):
+    // unikamy zależności od obsługi skipDuplicates
+    // przez konkretny provider bazy danych.
+
+    let synced = 0;
+
+    for (const notification of notifications) {
+      await prisma.notification.upsert({
+        where: {
+          id: notification.id,
+        },
+
+        create: notification,
+
+        // Nie resetujemy statusu przeczytania.
+        update: {},
+      });
+
+      synced += 1;
+    }
+
+    res.json({
+      synced,
+      items,
+    });
+  })
+);
+
 
 // GET /api/pets/:id — publiczny lub prywatny widok (E8). Prywatny profil: 404 dla obcych.
 petsRouter.get("/:id", optionalAuth, asyncHandler(async (req, res) => {
