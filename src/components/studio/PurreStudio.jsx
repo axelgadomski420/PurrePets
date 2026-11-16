@@ -64,10 +64,62 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
   const [stickers, setStickers] = useState([]);
   const [selectedLayerId, setSelectedLayerId] = useState(null);
   const [audio, setAudio] = useState({ music: null, musicVolume: 0.8, musicFadeIn: 1, musicFadeOut: 1.5, voice: null, voiceVolume: 1, muteOriginal: false, originalVolume: 1 });
+  const audioRef = useRef(audio);
+  const exportingRef = useRef(false);
+  const pendingAudioDisposalsRef = useRef([]);
+
+  const disposeAudioSource = (source) => {
+    if (!source) return;
+
+    try {
+      const element = source.element;
+      if (element) {
+        element.pause();
+        element.onended = null;
+        element.onerror = null;
+        element.removeAttribute("src");
+        element.load();
+      }
+    } catch {
+      // Czyszczenie audio nie może przerwać pracy edytora.
+    }
+
+    try {
+      if (typeof source.url === "string" && source.url.startsWith("blob:")) {
+        URL.revokeObjectURL(source.url);
+      }
+    } catch {
+      // Zwolnienie URL jest best-effort.
+    }
+  };
+
+  const disposeOrDeferAudioSource = (source) => {
+    if (!source) return;
+
+    if (exportingRef.current) {
+      pendingAudioDisposalsRef.current.push(source);
+      return;
+    }
+
+    disposeAudioSource(source);
+  };
+
+  useEffect(() => {
+    audioRef.current = audio;
+  }, [audio]);
+
+  useEffect(() => () => {
+    const current = audioRef.current;
+    disposeOrDeferAudioSource(current?.music);
+
+    if (current?.voice?.element !== current?.music?.element) {
+      disposeOrDeferAudioSource(current?.voice);
+    }
+  }, []);
   const [recording, setRecording] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [quality, setQuality] = useState("hd");
+  const [quality, setQuality] = useState(mode === "reel" ? "sd" : "hd");
   const [draftOffer, setDraftOffer] = useState(null);
   const past = useRef([]);
   const future = useRef([]);
@@ -329,16 +381,79 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
   // ---------- Audio (wideo) ----------
   const pickMusicFile = (file) => {
     if (!file) return;
+
+    if (!String(file.type || "").startsWith("audio/")) {
+      toast.error("Wybierz plik muzyczny w obsługiwanym formacie.");
+      return;
+    }
+
+    if (file.size <= 0 || file.size > 20 * 1024 * 1024) {
+      toast.error("Plik muzyczny musi mieć maksymalnie 20 MB.");
+      return;
+    }
+
     const url = URL.createObjectURL(file);
-    setAudio((prev) => ({ ...prev, music: { title: file.name.replace(/\.[^.]+$/, ""), artist: "Z urządzenia", url, element: new Audio(url), local: true } }));
+    const element = new Audio();
+    element.preload = "auto";
+    element.onerror = () => {
+      toast.error("Przeglądarka nie może odczytać wybranego pliku audio.");
+    };
+
+    element.src = url;
+    element.load();
+
+    const nextMusic = {
+      title: file.name.replace(/\.[^.]+$/, ""),
+      artist: "Z urządzenia",
+      url,
+      element,
+      local: true,
+    };
+
+    disposeOrDeferAudioSource(audioRef.current?.music);
+    audioRef.current = { ...audioRef.current, music: nextMusic };
+
+    setAudio((prev) => ({
+      ...prev,
+      music: nextMusic,
+    }));
+
+    toast.success("Dodano muzykę z urządzenia.");
   };
+
   const pickMusicTrack = (track) => {
     let element = null;
+
     if (track?.url) {
-      element = new Audio(track.url);
-      element.crossOrigin = "anonymous";
+      element = new Audio();
+      element.preload = "auto";
+
+      try {
+        const sourceUrl = new URL(track.url, window.location.href);
+        if (sourceUrl.origin !== window.location.origin) {
+          element.crossOrigin = "anonymous";
+        }
+      } catch {
+        // Nieprawidłowy adres zostanie zgłoszony przez element audio.
+      }
+
+      element.onerror = () => {
+        toast.error("Nie udało się wczytać wybranej ścieżki muzycznej.");
+      };
+
+      element.src = track.url;
+      element.load();
     }
-    setAudio((prev) => ({ ...prev, music: track ? { ...track, element } : null }));
+
+    const nextMusic = track ? { ...track, element } : null;
+
+    disposeOrDeferAudioSource(audioRef.current?.music);
+    audioRef.current = { ...audioRef.current, music: nextMusic };
+
+    setAudio((prev) => ({
+      ...prev,
+      music: nextMusic,
+    }));
   };
   const toggleRecording = async () => {
     if (recording) {
@@ -355,7 +470,19 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
         stream.getTracks().forEach((track) => track.stop());
         const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
         const url = URL.createObjectURL(blob);
-        setAudio((prev) => ({ ...prev, voice: { title: "Voiceover", url, element: new Audio(url) } }));
+        const nextVoice = {
+          title: "Voiceover",
+          url,
+          element: new Audio(url),
+        };
+
+        disposeOrDeferAudioSource(audioRef.current?.voice);
+        audioRef.current = { ...audioRef.current, voice: nextVoice };
+
+        setAudio((prev) => ({
+          ...prev,
+          voice: nextVoice,
+        }));
         setRecording(false);
         toast.success("Voiceover nagrany");
       };
@@ -407,7 +534,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
   // ---------- Eksport ----------
   const exportDims = () => {
     const format = STUDIO_FORMATS[active?.format ?? defaultFormat] ?? STUDIO_FORMATS.story;
-    const scale = quality === "sd" ? 0.66 : 1;
+    const scale = quality === "sd" ? (2 / 3) : 1;
     return { width: Math.round(format.width * scale), height: Math.round(format.height * scale) };
   };
 
@@ -531,7 +658,9 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
   };
 
   const runExport = async ({ publish }) => {
-    if (!items.length || exporting) return;
+    if (!items.length || exporting || exportingRef.current) return;
+
+    exportingRef.current = true;
     setExporting(true);
     setProgress(0);
     cancelRef.current = false;
@@ -583,6 +712,13 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
       if (err?.name === "ExportCancelled") toast.info("Eksport anulowany");
       else toast.error(err?.message ?? "Eksport nie powiódł się");
     } finally {
+      exportingRef.current = false;
+
+      const pendingDisposals = pendingAudioDisposalsRef.current.splice(0);
+      for (const source of pendingDisposals) {
+        disposeAudioSource(source);
+      }
+
       setExporting(false);
       setProgress(0);
       cancelRef.current = false;
@@ -818,11 +954,13 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
             )}
             {tab === "export" && (
               <>
-                <div className="flex gap-1.5">
-                  {[{ id: "hd", label: "Wysoka (1080)" }, { id: "sd", label: "Standard (720)" }].map((q) => (
-                    <button key={q.id} type="button" onClick={() => setQuality(q.id)} className={cn("flex-1 rounded-lg border py-2 text-[10px]", quality === q.id ? "border-aura text-aura" : "border-white/15 text-white/70")}>{q.label}</button>
-                  ))}
-                </div>
+                {mode !== "reel" && (
+                  <div className="flex gap-1.5">
+                    {[{ id: "hd", label: "Wysoka (1080p)" }, { id: "sd", label: "Standard (720p)" }].map((q) => (
+                      <button key={q.id} type="button" onClick={() => setQuality(q.id)} className={cn("flex-1 rounded-lg border py-2 text-[10px]", quality === q.id ? "border-aura text-aura" : "border-white/15 text-white/70")}>{q.label}</button>
+                    ))}
+                  </div>
+                )}
                 {exporting && (
                   <div>
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">

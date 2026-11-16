@@ -265,14 +265,14 @@ export default function AssistantPanel() {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="fixed bottom-24 right-4 z-40 grid h-12 w-12 place-items-center rounded-full bg-gradient-to-br from-violet to-aura text-black shadow-lg shadow-aura/20 lg:bottom-8"
+        className="fixed bottom-[calc(6rem-5mm)] right-4 z-40 grid h-12 w-12 place-items-center rounded-full bg-gradient-to-br from-violet to-aura text-black shadow-lg shadow-aura/20 lg:bottom-8"
         aria-label="Expurr — ekspert psów i kotów"
       >
         {open ? <X className="h-5 w-5" /> : <Bot className="h-5 w-5" />}
       </button>
 
       {open && (
-        <div className="fixed bottom-40 right-4 z-40 flex h-[min(520px,70dvh)] w-[min(380px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/95 shadow-2xl backdrop-blur-xl lg:bottom-24">
+        <div className="fixed bottom-[calc(10rem-5mm)] right-4 z-40 flex h-[min(520px,70dvh)] w-[min(380px,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border border-border/70 bg-card/95 shadow-2xl backdrop-blur-xl lg:bottom-24">
           <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
             <Sparkles className="h-4 w-4 text-aura" />
             <div className="min-w-0 flex-1">

@@ -84,12 +84,23 @@ async function request(path, { method = "GET", body, formData } = {}) {
   const current = token();
   if (current) headers.Authorization = `Bearer ${current}`;
   if (formData === undefined) headers["Content-Type"] = "application/json";
-  const response = await fetch(`${API_URL}${path}`, {
-    method,
-    headers,
-    credentials: "omit",
-    body: formData ?? (body === undefined ? undefined : JSON.stringify(body)),
-  });
+  let response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      method,
+      headers,
+      credentials: "omit",
+      body: formData ?? (body === undefined ? undefined : JSON.stringify(body)),
+    });
+  } catch (cause) {
+    if (cause instanceof TypeError) {
+      const error = new Error("Nie udało się połączyć z serwerem API.");
+      error.name = "ApiNetworkError";
+      error.cause = cause;
+      throw error;
+    }
+    throw cause;
+  }
   const text = await response.text();
   const payload = text ? JSON.parse(text) : null;
   if (!response.ok) throw new ApiError(response.status, payload);

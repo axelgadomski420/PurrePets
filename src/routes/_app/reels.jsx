@@ -87,7 +87,10 @@ function ReelsPage() {
               </div>
             ) : (
               <div key={row.data.id} className="h-full w-full snap-start">
-                <ReelVideo post={row.data} />
+                <ReelVideo
+                  post={row.data}
+                  onDeleted={(postId) => setPosts((current) => current.filter((post) => post.id !== postId))}
+                />
               </div>
             )
           )}

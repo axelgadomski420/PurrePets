@@ -27,6 +27,7 @@ export default function StoryComposer({ onClose, onPublished }) {
   const [track, setTrack] = useState(null);
   const [publishing, setPublishing] = useState(false);
   const fileRef = useRef(null);
+  const publishLockRef = useRef(false);
 
   useEffect(() => () => {
     if (mediaUrl) URL.revokeObjectURL(mediaUrl);
@@ -60,9 +61,18 @@ export default function StoryComposer({ onClose, onPublished }) {
 
   // Publikacja: onPublish dostaje WYEXPORTOWANE pliki z PurreStudio.
   const handlePublish = async ({ kind, files, coverBlob, meta }) => {
+    if (publishLockRef.current) return;
+
+    const fileToPublish = Array.isArray(files) ? files[0] : null;
+    if (!(fileToPublish instanceof File) || fileToPublish.size <= 0) {
+      toast.error("Studio nie przygotowało prawidłowego pliku do publikacji.");
+      throw new Error("Brak prawidłowego pliku wynikowego.");
+    }
+
+    publishLockRef.current = true;
     setPublishing(true);
     try {
-      const up = await base44.integrations.Core.UploadPublicFile({ file: files[0] });
+      const up = await base44.integrations.Core.UploadPublicFile({ file: fileToPublish });
       const uploadedUrl = getUploadedFileUrl(up);
       // Muzyka: dla wideo jest już ZMIKSOWANA w pliku; tytuł zapisujemy jako metadane.
       const musicTitle = track
@@ -87,6 +97,7 @@ export default function StoryComposer({ onClose, onPublished }) {
       toast.error(getUploadErrorMessage(err, "Nie udało się opublikować relacji"));
       throw err; // Studio pozostaje otwarte — użytkownik nie traci projektu
     } finally {
+      publishLockRef.current = false;
       setPublishing(false);
     }
   };

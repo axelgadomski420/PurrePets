@@ -69,6 +69,7 @@ function EventsPage() {
   const [city, setCity] = useState("");
   const [events, setEvents] = useState([]);
   const [offline, setOffline] = useState(false);
+  const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [open, setOpen] = useState(false);
@@ -83,15 +84,35 @@ function EventsPage() {
 
   const load = () => {
     setLoading(true);
+    setLoadError("");
     base44.social
       .events(city)
       .then((page) => {
-        setEvents(page.items ?? []);
+        setEvents(Array.isArray(page?.items) ? page.items : []);
         setOffline(false);
       })
-      .catch(() => {
-        setOffline(true);
-        setEvents(RADAR.filter((event) => !city || event.city === city));
+      .catch((error) => {
+        // Przykładowy radar pokazujemy wyłącznie przy rzeczywistym
+        // problemie sieciowym. Błędy HTTP nie mogą być maskowane.
+        if (error?.name === "ApiNetworkError") {
+          setOffline(true);
+          setEvents(RADAR.filter((event) => !city || event.city === city));
+          return;
+        }
+
+        setOffline(false);
+        setEvents([]);
+
+        const status = Number(error?.status || 0);
+        if (status === 401) {
+          setLoadError("Sesja wygasła. Zaloguj się ponownie i odśwież radar.");
+        } else if (status === 403) {
+          setLoadError("Nie masz uprawnień do wyświetlenia wydarzeń.");
+        } else if (status >= 500) {
+          setLoadError("Serwer nie może teraz pobrać wydarzeń. Spróbuj ponownie później.");
+        } else {
+          setLoadError(error?.message || "Nie udało się pobrać wydarzeń.");
+        }
       })
       .finally(() => setLoading(false));
   };
@@ -197,8 +218,25 @@ function EventsPage() {
 
         {offline && (
           <p className="mt-4 rounded-xl border border-chart-4/40 bg-chart-4/10 px-3 py-2 text-[11px] text-muted-foreground">
-            Podgląd radaru. Bilety zapiszą się na koncie, gdy backend będzie miał nowe tabele.
+            Brak połączenia z serwerem. Poniżej pokazano przykładowe wydarzenia — nie są to aktualne oferty, a zakup biletów i publikacja są chwilowo niedostępne.
           </p>
+        )}
+
+        {loadError && (
+          <div
+            role="alert"
+            className="mt-4 rounded-xl border border-destructive/40 bg-destructive/10 px-3 py-3 text-sm text-foreground"
+          >
+            <p>{loadError}</p>
+            <button
+              type="button"
+              onClick={load}
+              disabled={loading}
+              className="mt-2 rounded-lg border border-border/70 px-3 py-1.5 text-xs font-semibold disabled:opacity-60"
+            >
+              {loading ? "Ładowanie…" : "Spróbuj ponownie"}
+            </button>
+          </div>
         )}
 
         {open && (

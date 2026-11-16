@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { AuthGateError, requireSignedIn } from "@/components/auth/AuthGate";
 import { toast } from "sonner";
 import TopBar from "@/components/layout/TopBar";
-import { base44 } from "@/api/base44Client";
+import { groupsApi } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
 import { formatNumber } from "@/lib/format";
 
@@ -40,8 +40,7 @@ function CommunityPage() {
   const [form, setForm] = useState({ name: "", type: "breed", description: "", city: "", breed: "" });
 
   const load = () => {
-    base44.social
-      .groups(type)
+    groupsApi.list({ type })
       .then((page) => {
         setGroups(page.items ?? []);
         setOffline(false);
@@ -68,7 +67,7 @@ function CommunityPage() {
     }
     setBusy(group.id);
     try {
-      const result = group.joined ? await base44.social.leaveGroup(group.id) : await base44.social.joinGroup(group.id);
+      const result = group.joined ? await groupsApi.leave(group.id) : await groupsApi.join(group.id);
       setGroups((current) =>
         current.map((item) =>
           item.id === group.id ? { ...item, joined: result.joined, members_count: result.members_count } : item
@@ -89,7 +88,7 @@ function CommunityPage() {
     }
     setBusy("create");
     try {
-      await base44.social.createGroup({
+      await groupsApi.create({
         name: form.name,
         type: form.type,
         description: form.description || undefined,
@@ -197,6 +196,15 @@ function CommunityPage() {
                 <span className="text-[11px] text-aura">{formatNumber(group.members_count)} osób</span>
               </div>
               {group.description && <p className="mt-2 text-sm text-muted-foreground">{group.description}</p>}
+              {!offline && (
+                <Link
+                  to="/community/$id"
+                  params={{ id: group.id }}
+                  className="mt-4 inline-flex min-h-10 w-full items-center justify-center rounded-xl bg-foreground px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-background"
+                >
+                  Otwórz grupę
+                </Link>
+              )}
               <button
                 type="button"
                 disabled={busy === group.id}

@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { BadgeCheck, Heart, MessageCircle, Send, MapPin } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
+import { BadgeCheck, Heart, MessageCircle, Send, MapPin, Pencil, Trash2 } from "lucide-react";
 import { Image } from "@/components/ui/image";
 import { base44 } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
@@ -16,6 +17,17 @@ export default function PostCard({ post, demo = false }) {
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
+  const [removed, setRemoved] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editCaption, setEditCaption] = useState(post.caption || "");
+  const [editTags, setEditTags] = useState((post.tags || []).join(", "));
+  const [displayCaption, setDisplayCaption] = useState(post.caption || "");
+  const [displayTags, setDisplayTags] = useState(
+    Array.isArray(post.tags) ? post.tags : []
+  );
+  const mutationLockRef = useRef(false);
+  const canManage = !demo && isAuthenticated &&
+    (post.author_id === user?.id || post.created_by_id === user?.id);
 
   useEffect(() => {
     if (demo) return;
@@ -59,6 +71,83 @@ export default function PostCard({ post, demo = false }) {
     }
   };
 
+  const sharePost = async () => {
+    const url = post.video_url || post.image_url || post.image || window.location.href;
+    const payload = {
+      title: (post.caption || "PURRE PETS").slice(0, 100),
+      text: post.caption || "Zobacz post w PURRE PETS",
+      url,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(payload);
+        return;
+      }
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(url);
+        toast.success("Link do materiału skopiowany.");
+        return;
+      }
+      window.prompt("Skopiuj link do materiału:", url);
+    } catch (error) {
+      if (error?.name !== "AbortError") {
+        toast.error("Nie udało się udostępnić materiału.");
+      }
+    }
+  };
+
+  const savePost = async () => {
+    if (!canManage || busy || mutationLockRef.current || removed) return;
+
+    mutationLockRef.current = true;
+    setBusy(true);
+    try {
+      const cleanCaption = editCaption.trim();
+      const tags = editTags.split(",")
+        .map((tag) => tag.trim().replace(/^#/, ""))
+        .filter(Boolean).slice(0, 30);
+
+      await base44.entities.Post.update(post.id, {
+        caption: cleanCaption,
+        tags,
+      });
+
+      setDisplayCaption(cleanCaption);
+      setDisplayTags(tags);
+      setEditCaption(cleanCaption);
+      setEditTags(tags.join(", "));
+      setEditing(false);
+      toast.success("Post został zaktualizowany.");
+    } catch (error) {
+      toast.error(error?.message || "Nie udało się zapisać zmian.");
+    } finally {
+      mutationLockRef.current = false;
+      setBusy(false);
+    }
+  };
+
+  const deletePost = async () => {
+    if (!canManage || busy || mutationLockRef.current || removed) return;
+
+    if (!window.confirm("Czy na pewno usunąć ten post? Tej operacji nie można cofnąć.")) {
+      return;
+    }
+
+    mutationLockRef.current = true;
+    setBusy(true);
+    try {
+      await base44.entities.Post.delete(post.id);
+      setRemoved(true);
+      toast.success("Post został usunięty.");
+    } catch (error) {
+      toast.error(error?.message || "Nie udało się usunąć postu.");
+    } finally {
+      mutationLockRef.current = false;
+      setBusy(false);
+    }
+  };
+
   const addComment = async () => {
     const content = draft.trim();
     if (!content || busy) return;
@@ -80,6 +169,8 @@ export default function PostCard({ post, demo = false }) {
       setBusy(false);
     }
   };
+
+  if (removed) return null;
 
   return (
     <article className="overflow-hidden rounded-[var(--radius)] border border-border/70 bg-card/60">
@@ -156,18 +247,66 @@ export default function PostCard({ post, demo = false }) {
           </button>
           <button
             type="button"
+            onClick={sharePost}
             className="ml-auto text-muted-foreground transition hover:text-foreground"
             aria-label="Udostępnij"
           >
             <Send className="h-[18px] w-[18px]" />
           </button>
+          {canManage && (
+            <>
+              <button type="button"
+                onClick={() => {
+                  setEditCaption(displayCaption);
+                  setEditTags(displayTags.join(", "));
+                  setEditing((value) => !value);
+                }}
+                disabled={busy}
+                className="text-muted-foreground hover:text-foreground disabled:opacity-50"
+                aria-label="Edytuj post">
+                <Pencil className="h-4 w-4" />
+              </button>
+              <button type="button" onClick={deletePost} disabled={busy}
+                className="text-muted-foreground hover:text-destructive disabled:opacity-50"
+                aria-label="Usuń post">
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </>
+          )}
         </div>
 
-        <p className="mt-3 text-[13px] leading-relaxed text-foreground/90">{post.caption}</p>
+        {editing && canManage && (
+          <div className="mt-3 space-y-2 rounded-xl border border-border/70 bg-background/60 p-3">
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Opis
+            </label>
+            <textarea value={editCaption} onChange={(event) => setEditCaption(event.target.value)}
+              rows={3} maxLength={4000}
+              className="w-full resize-y rounded-lg border border-border/70 bg-background p-2 text-sm outline-none focus:border-violet" />
+            <label className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Hashtagi — oddziel przecinkami
+            </label>
+            <input value={editTags} onChange={(event) => setEditTags(event.target.value)}
+              maxLength={500} placeholder="psy, koty, hodowla"
+              className="h-10 w-full rounded-lg border border-border/70 bg-background px-3 text-sm outline-none focus:border-violet" />
+            <div className="flex gap-2">
+              <button type="button" onClick={savePost} disabled={busy}
+                className="btn-aura rounded-lg px-4 py-2 text-xs disabled:opacity-50">
+                {busy ? "Zapisywanie…" : "Zapisz"}
+              </button>
+              <button type="button" onClick={() => setEditing(false)}
+                disabled={busy}
+                className="rounded-lg border border-border px-4 py-2 text-xs disabled:opacity-50">
+                Anuluj
+              </button>
+            </div>
+          </div>
+        )}
+        <p className="mt-3 text-[13px] leading-relaxed text-foreground/90">{displayCaption}</p>
 
-        {post.tags?.length > 0 && (
+        {displayTags.length > 0 && (
           <div className="mt-3 flex flex-wrap gap-1.5">
-            {post.tags.map((tag) => (
+            {displayTags.map((tag) => (
               <span
                 key={tag}
                 className="rounded-full border border-border/70 px-2.5 py-1 text-[10px] uppercase tracking-[0.14em] text-muted-foreground"

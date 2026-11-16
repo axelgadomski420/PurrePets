@@ -48,6 +48,8 @@ export function initSocket(httpServer, corsOrigins) {
 
   io.on("connection", (socket) => {
     const user = socket.data.user;
+    // Każde połączenie użytkownika musi odbierać sygnalizację WebRTC.
+    socket.join(`user:${user.id}`);
 
     // presence
     if (!onlineUsers.has(user.id)) {

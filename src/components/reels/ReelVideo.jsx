@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { BadgeCheck, Heart, Loader2, MapPin, MessageCircle, Share2, Volume2, VolumeX } from "lucide-react";
+import { BadgeCheck, Heart, Loader2, MapPin, MessageCircle, Share2, Volume2, VolumeX, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { base44 } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils";
  *  • podwójne tapnięcie = polubienie z animacją serca,
  *  • pasek postępu, wyciszanie, udostępnianie.
  */
-export default function ReelVideo({ post }) {
+export default function ReelVideo({ post, onDeleted }) {
   const { user, isAuthenticated, navigateToLogin } = useAuth();
   const navigate = useNavigate();
   const sectionRef = useRef(null);
@@ -28,6 +28,15 @@ export default function ReelVideo({ post }) {
   const [likes, setLikes] = useState(post.likes ?? 0);
   const [burst, setBurst] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [removed, setRemoved] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
+  const actionLockRef = useRef(false);
+  const [displayCaption, setDisplayCaption] = useState(post.caption || "");
+  const [displayTags, setDisplayTags] = useState(
+    Array.isArray(post.tags) ? post.tags : []
+  );
+  const canManage = isAuthenticated &&
+    (post.author_id === user?.id || post.created_by_id === user?.id);
 
   useEffect(() => {
     const element = sectionRef.current;
@@ -94,6 +103,71 @@ export default function ReelVideo({ post }) {
     } catch { /* Użytkownik może anulować systemowe udostępnianie. */ }
   };
 
+  const editReel = async () => {
+    if (!canManage || actionLockRef.current || removed) return;
+
+    actionLockRef.current = true;
+    setActionBusy(true);
+
+    try {
+      const caption = window.prompt(
+        "Edytuj opis rolki:",
+        displayCaption
+      );
+      if (caption === null) return;
+
+      const tagsInput = window.prompt(
+        "Hashtagi oddzielone przecinkami:",
+        displayTags.join(", ")
+      );
+      if (tagsInput === null) return;
+
+      const cleanCaption = caption.trim();
+      const tags = tagsInput
+        .split(",")
+        .map((tag) => tag.trim().replace(/^#/, ""))
+        .filter(Boolean)
+        .slice(0, 30);
+
+      await base44.entities.Post.update(post.id, {
+        caption: cleanCaption,
+        tags,
+      });
+
+      setDisplayCaption(cleanCaption);
+      setDisplayTags(tags);
+      toast.success("Rolka została zaktualizowana.");
+    } catch (error) {
+      toast.error(error?.message || "Nie udało się edytować rolki.");
+    } finally {
+      actionLockRef.current = false;
+      setActionBusy(false);
+    }
+  };
+
+  const deleteReel = async () => {
+    if (!canManage || actionLockRef.current || removed) return;
+
+    actionLockRef.current = true;
+    setActionBusy(true);
+
+    try {
+      if (!window.confirm("Usunąć tę rolkę? Tej operacji nie można cofnąć.")) {
+        return;
+      }
+
+      await base44.entities.Post.delete(post.id);
+      setRemoved(true);
+      onDeleted?.(post.id);
+      toast.success("Rolka została usunięta.");
+    } catch (error) {
+      toast.error(error?.message || "Nie udało się usunąć rolki.");
+    } finally {
+      actionLockRef.current = false;
+      setActionBusy(false);
+    }
+  };
+
   const message = async () => {
     if (!isAuthenticated) {
       navigateToLogin();
@@ -112,6 +186,8 @@ export default function ReelVideo({ post }) {
       setStarting(false);
     }
   };
+
+  if (removed) return null;
 
   return (
     <section ref={sectionRef} className="relative h-full w-full snap-start snap-always overflow-hidden bg-black">
@@ -157,7 +233,7 @@ export default function ReelVideo({ post }) {
             <span className="truncate">{post.author_name || "Hodowca PURRE"}</span>
             {post.author_verified && <BadgeCheck className="h-4 w-4 shrink-0 text-aura" />}
           </p>
-          <p className="mt-1 line-clamp-3 text-[12px] leading-relaxed text-white/85">{post.caption}</p>
+          <p className="mt-1 line-clamp-3 text-[12px] leading-relaxed text-white/85">{displayCaption}</p>
           <p className="mt-1.5 flex flex-wrap items-center gap-2 text-[10px] uppercase tracking-[0.14em] text-white/60">
             {post.city && (
               <span className="flex items-center gap-1">
@@ -166,9 +242,9 @@ export default function ReelVideo({ post }) {
             )}
             {post.breed && <span>{post.breed}</span>}
           </p>
-          {post.tags?.length > 0 && (
+          {displayTags.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
-              {post.tags.map((tag) => (
+              {displayTags.map((tag) => (
                 <span key={tag} className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] text-white/80">
                   #{tag}
                 </span>
@@ -199,6 +275,22 @@ export default function ReelVideo({ post }) {
             <span className="text-[10px]">Udostępnij</span>
           </button>
 
+          {canManage && (
+            <>
+              <button type="button" onClick={editReel}
+                disabled={actionBusy}
+                className="grid h-11 w-11 place-items-center rounded-full bg-black/40 text-white backdrop-blur disabled:opacity-50"
+                aria-label="Edytuj rolkę" aria-busy={actionBusy}>
+                <Pencil className="h-5 w-5" />
+              </button>
+              <button type="button" onClick={deleteReel}
+                disabled={actionBusy}
+                className="grid h-11 w-11 place-items-center rounded-full bg-black/40 text-white backdrop-blur disabled:opacity-50"
+                aria-label="Usuń rolkę" aria-busy={actionBusy}>
+                <Trash2 className="h-5 w-5" />
+              </button>
+            </>
+          )}
           <button type="button" onClick={() => setMuted((value) => !value)} className="grid h-11 w-11 place-items-center rounded-full bg-black/40 text-white backdrop-blur" aria-label={muted ? "Włącz dźwięk" : "Wycisz"}>
             {muted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
           </button>

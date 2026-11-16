@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createFileRoute, useNavigate, useParams } from "@tanstack/react-router";
-import { ArrowLeft, BadgeCheck, MapPin, MessageCircle, ShieldCheck, Sparkles } from "lucide-react";
+import { ArrowLeft, BadgeCheck, MapPin, MessageCircle, ShieldCheck, Sparkles, Pencil, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Image } from "@/components/ui/image";
 import { base44 } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
@@ -25,12 +26,73 @@ function ListingPage() {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [active, setActive] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editForm, setEditForm] = useState({
+    title: "", description: "", price: "", city: "", breed: "", age_months: "",
+  });
 
   useEffect(() => {
     base44.entities.Listing.get(id)
       .then(setListing)
       .finally(() => setLoading(false));
   }, [id]);
+
+  const canManage = !!(isAuthenticated && listing &&
+    (listing.seller_id === user?.id || listing.created_by_id === user?.id));
+
+  const startEditing = () => {
+    setEditForm({
+      title: listing.title || "",
+      description: listing.description || "",
+      price: listing.price ?? "",
+      city: listing.city || "",
+      breed: listing.breed || "",
+      age_months: listing.age_months ?? "",
+    });
+    setEditing(true);
+  };
+
+  const saveListing = async () => {
+    if (!canManage || saving) return;
+    if (editForm.title.trim().length < 3 || editForm.city.trim().length < 2) {
+      toast.error("Podaj tytuł (min. 3 znaki) i miasto.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const updated = await base44.entities.Listing.update(id, {
+        title: editForm.title.trim(),
+        description: editForm.description.trim(),
+        price: editForm.price === "" ? null : Number(editForm.price),
+        city: editForm.city.trim(),
+        breed: editForm.breed.trim() || null,
+        age_months: editForm.age_months === "" ? null : Number(editForm.age_months),
+      });
+      setListing(updated);
+      setEditing(false);
+      toast.success("Ogłoszenie zostało zaktualizowane.");
+    } catch (error) {
+      toast.error(error?.message || "Nie udało się zapisać ogłoszenia.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteListing = async () => {
+    if (!canManage || saving) return;
+    if (!window.confirm("Usunąć to ogłoszenie? Tej operacji nie można cofnąć.")) return;
+    setSaving(true);
+    try {
+      await base44.entities.Listing.delete(id);
+      toast.success("Ogłoszenie zostało usunięte.");
+      navigate({ to: "/explore" });
+    } catch (error) {
+      toast.error(error?.message || "Nie udało się usunąć ogłoszenia.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const contact = async () => {
     if (!isAuthenticated) {
@@ -114,10 +176,65 @@ function ListingPage() {
             <p className="mt-4 whitespace-pre-line text-sm leading-relaxed text-foreground/85">
               {listing.description}
             </p>
+
+            {editing && canManage && (
+              <div className="mt-4 space-y-3 rounded-xl border border-border/70 bg-card/70 p-3">
+                {[
+                  ["title", "Tytuł"],
+                  ["city", "Miasto"],
+                  ["breed", "Rasa / typ"],
+                  ["price", "Cena (PLN)"],
+                  ["age_months", "Wiek w miesiącach"],
+                ].map(([key, label]) => (
+                  <label key={key} className="block text-xs text-muted-foreground">
+                    {label}
+                    <input
+                      type={key === "price" || key === "age_months" ? "number" : "text"}
+                      min={key === "price" || key === "age_months" ? "0" : undefined}
+                      value={editForm[key]}
+                      onChange={(event) => setEditForm((current) => ({ ...current, [key]: event.target.value }))}
+                      className="mt-1 h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground"
+                    />
+                  </label>
+                ))}
+                <label className="block text-xs text-muted-foreground">
+                  Opis
+                  <textarea
+                    rows={4}
+                    maxLength={4000}
+                    value={editForm.description}
+                    onChange={(event) => setEditForm((current) => ({ ...current, description: event.target.value }))}
+                    className="mt-1 w-full rounded-lg border border-border bg-background p-3 text-sm text-foreground"
+                  />
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  <button type="button" onClick={saveListing} disabled={saving}
+                    className="btn-aura rounded-lg px-4 py-2 text-xs disabled:opacity-50">
+                    {saving ? "Zapisywanie…" : "Zapisz zmiany"}
+                  </button>
+                  <button type="button" onClick={() => setEditing(false)}
+                    className="rounded-lg border border-border px-4 py-2 text-xs">
+                    Anuluj
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
         <aside className="flex flex-col gap-3">
+          {canManage && (
+            <div className="flex flex-wrap gap-2 rounded-[var(--radius)] border border-border/70 bg-card/70 p-3">
+              <button type="button" onClick={startEditing}
+                className="flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg border border-border px-3 text-xs">
+                <Pencil className="h-4 w-4" /> Edytuj
+              </button>
+              <button type="button" onClick={deleteListing} disabled={saving}
+                className="flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg border border-destructive/40 px-3 text-xs text-destructive disabled:opacity-50">
+                <Trash2 className="h-4 w-4" /> Usuń
+              </button>
+            </div>
+          )}
           <div className="rounded-[var(--radius)] border border-border/70 bg-card/70 p-4">
             <div className="flex items-center justify-between">
               <p className="font-display text-2xl">

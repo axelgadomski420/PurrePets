@@ -35,11 +35,25 @@ function resolve(req) {
   return entity;
 }
 
+function ownerIdOf(entity, row) {
+  switch (entity.delegate) {
+    case "profile": return row.user_id || row.created_by_id;
+    case "listing": return row.seller_id || row.created_by_id;
+    case "post": return row.author_id || row.created_by_id;
+    case "pet": return row.owner_id || row.created_by_id;
+    case "comment": return row.author_id || row.created_by_id;
+    case "like": return row.user_id || row.created_by_id;
+    case "follow": return row.follower_id || row.created_by_id;
+    case "event": return row.organizer_id || row.created_by_id;
+    default: return row.created_by_id;
+  }
+}
+
 function canWrite(entity, req, row) {
   if (isAdmin(req)) return true;
   switch (entity.write) {
     case "ownerOrAdmin":
-      return row.created_by_id === userIdOf(req);
+      return ownerIdOf(entity, row) === userIdOf(req);
     case "memberOrAdmin":
       return Array.isArray(row.members) && row.members.includes(userIdOf(req));
     case "adminOnly":
