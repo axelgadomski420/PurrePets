@@ -1,0 +1,127 @@
+# PURRE PETS — CI (Node.js 22).
+# Kolejność jest sekwencyjna: job "lockfile" regeneruje package-lock.json, commituje go i WYPYCHA,
+# a dopiero potem job "test" sprawdza HEAD gałęzi (commit z poprawionym lockfile). Push wykonany
+# GITHUB_TOKEN nie wyzwala kolejnego workflow — dlatego "test" musi sam pobrać nowy HEAD.
+# W "test" procesy są zarządzane wyłącznie przez PM2 (bez pkill — zero ryzyka zabicia własnego shella).
+# Produkcja NIE jest dotykana; baza istnieje tylko w ramach tego przebiegu.
+name: CI
+
+on:
+  push:
+    branches: [fix/production-node-deployment, feature/node-nitro-migration]
+  pull_request:
+    branches: [fix/production-node-deployment, feature/node-nitro-migration]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  lockfile:
+    name: Regeneracja i weryfikacja package-lock.json
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Regeneruj lockfile (npm install --package-lock-only, bez --force / --legacy-peer-deps)
+        run: npm install --package-lock-only
+      - name: Weryfikacja frontend: npm ci
+        run: npm ci
+      - name: Weryfikacja backend: npm ci
+        run: cd backend && npm ci
+      - name: Commit i push zregenerowanego lockfile (jeśli się zmienił)
+        run: |
+          if ! git diff --quiet package-lock.json; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add package-lock.json
+            git commit -m "chore: regenerate package-lock.json (CI, Node 22, bez --force)"
+            git push origin HEAD:fix/production-node-deployment
+          else
+            echo "Lockfile zgodny z package.json — bez zmian."
+          fi
+
+  test:
+    name: npm ci + lint + build + smoke-test + PM2 (na HEAD z lockfile)
+    needs: lockfile
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: purrepets
+          POSTGRES_PASSWORD: purrepets_ci
+          POSTGRES_DB: purrepets_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://purrepets:purrepets_ci@localhost:5432/purrepets_ci
+      JWT_SECRET: ci-only-placeholder-not-a-real-secret
+      NODE_ENV: production
+      UPLOAD_DIR: ${{ github.workspace }}/backend/uploads
+      PURRE_APP_DIR: ${{ github.workspace }}
+    steps:
+      # HEAD gałęzi (nie github.sha): zawiera commit z lockfile wygenerowany wyżej,
+      # bo push przez GITHUB_TOKEN nie uruchamia kolejnego workflow.
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/production-node-deployment
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: npm ci (frontend)
+        run: npm ci
+      - name: npm ci (backend)
+        run: cd backend && npm ci
+      - name: Prisma generate + migrate deploy (wyłącznie efemeryczna baza CI)
+        run: |
+          cd backend
+          npx prisma generate
+          mkdir -p uploads
+          npx prisma migrate deploy
+      - name: Lint
+        run: npm run lint
+      - name: Build (Vite + Nitro)
+        run: npm run build
+      - name: Smoke-test artefaktów (przed startem procesów)
+        run: SMOKE_ALLOW_OFFLINE=1 npm test
+      - name: Start frontendu + backendu przez PM2 (PURRE_APP_DIR = checkout)
+        run: |
+          mkdir -p logs
+          npm install -g pm2
+          pm2 start ecosystem.config.cjs
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:3000/ && break; sleep 1; done
+          for i in $(seq 1 30); do curl -sf -o /dev/null http://127.0.0.1:4000/api/health && break; sleep 1; done
+      - name: Weryfikacja, że PM2 uruchomił procesy w katalogu checkoutu
+        run: |
+          pm2 describe purrepets-frontend | grep -F "$GITHUB_WORKSPACE"
+          pm2 describe purrepets-backend  | grep -F "$GITHUB_WORKSPACE"
+          pm2 ls
+      - name: Pełny smoke-test HTTP (SSR /, /login, /robots.txt, /api/health)
+        run: npm test
+      - name: Sprzątanie — wyłącznie nasze procesy PM2
+        if: always()
+        run: |
+          pm2 delete purrepets-frontend || true
+          pm2 delete purrepets-backend || true
+          pm2 kill || true
+      - name: Logi diagnostyczne (przy porażce)
+        if: failure()
+        run: |
+          echo '--- PM2 frontend-out ---'; tail -50 logs/frontend-out.log || true
+          echo '--- PM2 frontend-error ---'; tail -50 logs/frontend-error.log || true
+          echo '--- PM2 backend-out ---'; tail -50 logs/backend-out.log || true
+          echo '--- PM2 backend-error ---'; tail -50 logs/backend-error.log || true

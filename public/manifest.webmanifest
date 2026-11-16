@@ -1,0 +1,25 @@
+{
+  "name": "PURRE PETS — social dla hodowców",
+  "short_name": "PURRE",
+  "description": "HoloFeed, Reels, PURRE Messenger i marketplace dla hodowców psów i kotów rasowych.",
+  "lang": "pl",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0a0a0f",
+  "theme_color": "#0a0a0f",
+  "categories": [
+    "social",
+    "shopping",
+    "lifestyle"
+  ],
+  "icons": [
+    {
+      "src": "/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /
+Disallow: /admin
+Disallow: /api
+
+# Główne podstrony PURRE PETS
+# Sitemap: https://purrepets.pl/sitemap.xml
