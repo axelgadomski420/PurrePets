@@ -446,3 +446,294 @@ export function validateStudioFile(file, mode = "all") {
 
   return { type: isVideo ? "video" : "image", size: file.size };
 }
+
+// ------------------------------------------------------------------
+// EKSPORT WIDEO (Studio) — MediaRecorder z wykrywaniem możliwości
+// przeglądarki: preferowany MP4/H.264 (Safari iOS), fallback WebM.
+// Obsługuje wiele klipów (nagrywanych sekwencyjnie do JEDNEGO pliku),
+// miks audio (oryginał + muzyka + voiceover) z głośnością i fade,
+// pasek postępu, anulowanie i pełne zwalnianie zasobów.
+// ------------------------------------------------------------------
+
+const studioVideoAudioCtx = new WeakMap(); // window -> AudioContext (singleton per karta)
+const studioMediaSources = new WeakMap(); // element -> MediaElementAudioSourceNode
+
+function studioAudioContext() {
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if (!Ctx) return null;
+  let ctx = studioVideoAudioCtx.get(window);
+  if (!ctx || ctx.state === "closed") {
+    ctx = new Ctx();
+    studioVideoAudioCtx.set(window, ctx);
+  }
+  return ctx;
+}
+
+// MediaElementSource można utworzyć tylko RAZ na element — cache w WeakMap.
+function mediaSourceFor(ctx, element) {
+  if (!element) return null;
+  let source = studioMediaSources.get(element);
+  if (source) return source;
+  try {
+    source = ctx.createMediaElementSource(element);
+    studioMediaSources.set(element, source);
+    return source;
+  } catch {
+    return null;
+  }
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function waitForSeek(video, target) {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      video.removeEventListener("seeked", finish);
+      resolve();
+    };
+    video.addEventListener("seeked", finish);
+    video.currentTime = target;
+    setTimeout(finish, 1200); // nigdy nie zawieszaj eksportu na seeku
+  });
+}
+
+function canvasSupportsFilter(context) {
+  try {
+    const previous = context.filter;
+    context.filter = "blur(1px)";
+    const supported = context.filter !== "none" && context.filter !== previous;
+    context.filter = previous || "none";
+    return supported;
+  } catch {
+    return false;
+  }
+}
+
+function scheduleGain(gain, ctx, startAt, duration, { volume = 1, fadeIn = 0, fadeOut = 0 }) {
+  const v = Math.min(Math.max(Number(volume) || 0, 0), 1.5);
+  const inSec = Math.min(Math.max(Number(fadeIn) || 0, 0), duration / 2);
+  const outSec = Math.min(Math.max(Number(fadeOut) || 0, 0), duration / 2);
+  gain.gain.cancelScheduledValues(startAt);
+  gain.gain.setValueAtTime(inSec > 0 ? 0.0001 : v, startAt);
+  if (inSec > 0) gain.gain.linearRampToValueAtTime(v, startAt + inSec);
+  if (outSec > 0) {
+    gain.gain.setValueAtTime(v, startAt + duration - outSec);
+    gain.gain.linearRampToValueAtTime(0.0001, startAt + duration);
+  }
+}
+
+/**
+ * Eksport wideo STUDIO.
+ * clips: [{ video: HTMLVideoElement (załadowany), trimStart, trimEnd, speed, filter,
+ *           brightness, contrast, saturation }]
+ * overlays: { textLayers, stickers } — wspólne dla wszystkich klipów.
+ * audio: { originalVolume, music: { element, volume, fadeIn, fadeOut },
+ *          voice: { element, volume, fadeIn, fadeOut } }
+ * Opcje: width, height, fps, videoBitsPerSecond, onProgress(0-100),
+ *        shouldCancel() => bool, onWarning(msg).
+ * Zwraca { blob, mimeType, extension }. Rzuca ExportCancelled przy anulowaniu.
+ */
+export async function exportStudioVideo(options = {}) {
+  const clips = (options.clips ?? []).filter((c) => c?.video?.videoWidth);
+  if (!clips.length) throw new Error("Brak klipów wideo do eksportu.");
+  if (typeof MediaRecorder === "undefined") {
+    throw new Error("Ta przeglądarka nie obsługuje nagrywania wideo (MediaRecorder).");
+  }
+
+  const mime = getSupportedVideoMimeType();
+  if (!mime) throw new Error("Brak obsługiwanego formatu nagrywania w tej przeglądarce.");
+
+  const width = Math.round(options.width ?? 720);
+  const height = Math.round(options.height ?? 1280);
+  const fps = Math.min(Math.max(options.fps ?? 30, 10), 60);
+  const shouldCancel = options.shouldCancel ?? (() => false);
+  const onProgress = options.onProgress ?? (() => {});
+  const onWarning = options.onWarning ?? (() => {});
+
+  const canvas = createStudioCanvas(width, height);
+  const context = canvas.getContext("2d", { alpha: false });
+  const filterSupported = canvasSupportsFilter(context);
+  const overlays = options.overlays ?? {};
+
+  const totalSpan = clips.reduce((sum, c) => sum + Math.max((c.trimEnd ?? 0) - (c.trimStart ?? 0), 0.1), 0);
+  let recorded = 0;
+
+  // --- Audio: jeden graf dla całego eksportu ---
+  const audio = options.audio ?? {};
+  const audioCtx = studioAudioContext();
+  let destStream = null;
+  const connected = [];
+  if (audioCtx) {
+    try {
+      await audioCtx.resume().catch(() => {});
+      const dest = audioCtx.createMediaStreamDestination();
+      destStream = dest.stream;
+      const originalVolume = audio.muteOriginal ? 0 : Math.min(Math.max(audio.originalVolume ?? 1, 0), 1.5);
+      for (const clip of clips) {
+        const source = mediaSourceFor(audioCtx, clip.video);
+        if (!source) continue;
+        const gain = audioCtx.createGain();
+        const span = Math.max((clip.trimEnd ?? 0) - (clip.trimStart ?? 0), 0.1);
+        scheduleGain(gain, audioCtx, 0, 1, { volume: originalVolume }); // stała głośność oryginału
+        source.connect(gain);
+        gain.connect(dest);
+        connected.push({ source, gain, perClipVolume: originalVolume, span });
+      }
+      for (const track of [audio.music, audio.voice]) {
+        if (!track?.element) continue;
+        const source = mediaSourceFor(audioCtx, track.element);
+        if (!source) {
+          onWarning("Nie udało się podpiąć ścieżki audio (CORS) — eksport bez tej ścieżki.");
+          continue;
+        }
+        const gain = audioCtx.createGain();
+        source.connect(gain);
+        gain.connect(dest);
+        connected.push({ source, gain, track });
+      }
+    } catch {
+      destStream = null;
+      onWarning("Miks audio niedostępny — eksport bez dźwięku.");
+    }
+  }
+
+  const stream = canvas.captureStream(fps);
+  if (destStream) {
+    for (const track of destStream.getAudioTracks()) stream.addTrack(track);
+  }
+
+  const recorder = new MediaRecorder(stream, {
+    mimeType: mime,
+    videoBitsPerSecond: options.videoBitsPerSecond ?? 4_000_000,
+  });
+  const chunks = [];
+  recorder.ondataavailable = (event) => {
+    if (event.data?.size) chunks.push(event.data);
+  };
+  const stopped = new Promise((resolve) => {
+    recorder.onstop = () => resolve();
+  });
+
+  const cleanup = () => {
+    try {
+      for (const clip of clips) clip.video.pause();
+      for (const item of connected) {
+        try { item.gain.disconnect(); } catch { /* już rozłączony */ }
+      }
+      for (const track of stream.getTracks()) track.stop();
+      canvas.width = 1;
+      canvas.height = 1;
+    } catch { /* cleanup nie może maskować błędu eksportu */ }
+  };
+
+  class ExportCancelled extends Error {
+    constructor() {
+      super("Eksport anulowany.");
+      this.name = "ExportCancelled";
+    }
+  }
+
+  try {
+    recorder.start(250);
+    for (let index = 0; index < clips.length; index += 1) {
+      if (shouldCancel()) throw new ExportCancelled();
+      const clip = clips[index];
+      const trimStart = Math.max(clip.trimStart ?? 0, 0);
+      const trimEnd = Math.max(clip.trimEnd ?? clip.video.duration ?? 0, trimStart + 0.1);
+      const span = trimEnd - trimStart;
+      const speed = Math.min(Math.max(clip.speed ?? 1, 0.25), 4);
+      const preset = getStudioFilter(clip.filter);
+
+      await waitForSeek(clip.video, trimStart);
+
+      // FIX: play() może się nie udać (autoplay policy) — nie wieszamy eksportu.
+      const played = clip.video.play();
+      const started = await Promise.race([
+        played.then(() => true).catch(() => false),
+        sleep(2500).then(() => false),
+      ]);
+      if (!started || clip.video.paused) {
+        throw new Error("Przeglądarka zablokowała odtwarzanie wideo — kliknij w dowolnym miejscu strony i spróbuj ponownie.");
+      }
+      clip.video.playbackRate = speed;
+
+      // Podpięcie audio tego klipu: głośność oryginału per klip.
+      const clipAudio = connected.find((item) => item.source && studioMediaSources.get(clip.video) === item.source);
+      if (clipAudio && audioCtx) {
+        scheduleGain(clipAudio.gain, audioCtx, audioCtx.currentTime, span, {
+          volume: audio.muteOriginal ? 0 : (audio.originalVolume ?? 1),
+        });
+      }
+      // Muzyka/voiceover: fade liczony od początku całego eksportu.
+      for (const item of connected) {
+        if (!item.track || !audioCtx) continue;
+        if (index === 0) {
+          scheduleGain(item.gain, audioCtx, audioCtx.currentTime, totalSpan, item.track);
+        }
+      }
+
+      const paint = () => {
+        if (shouldCancel()) return false;
+        renderStudioFrame(clip.video, canvas, {
+          width,
+          height,
+          format: options.format ?? "reel",
+          filter: filterSupported ? preset.id : "none",
+          brightness: clip.brightness ?? 100,
+          contrast: clip.contrast ?? 100,
+          saturation: clip.saturation ?? 100,
+          rotation: clip.rotation,
+          flipX: clip.flipX,
+          flipY: clip.flipY,
+          zoom: clip.zoom,
+          offsetX: clip.offsetX,
+          offsetY: clip.offsetY,
+          textLayers: overlays.textLayers,
+          stickers: overlays.stickers,
+        });
+        return true;
+      };
+
+      await new Promise((resolve, reject) => {
+        const loop = () => {
+          if (shouldCancel()) {
+            reject(new ExportCancelled());
+            return;
+          }
+          if (clip.video.currentTime >= trimEnd || clip.video.ended) {
+            clip.video.pause();
+            recorded += span;
+            onProgress(Math.min(99, Math.round((recorded / totalSpan) * 100)));
+            resolve();
+            return;
+          }
+          if (!paint()) {
+            reject(new ExportCancelled());
+            return;
+          }
+          onProgress(Math.min(99, Math.round(((recorded + (clip.video.currentTime - trimStart)) / totalSpan) * 100)));
+          requestAnimationFrame(loop);
+        };
+        loop();
+      });
+    }
+
+    onProgress(100);
+    recorder.stop();
+    await stopped;
+    const blob = new Blob(chunks, { type: mime });
+    if (!blob.size) throw new Error("Eksport nie wygenerował danych wideo.");
+    return { blob, mimeType: mime, extension: mime.includes("mp4") ? "mp4" : "webm" };
+  } catch (err) {
+    try { recorder.stop(); } catch { /* już zatrzymany */ }
+    await stopped;
+    throw err;
+  } finally {
+    cleanup();
+  }
+}

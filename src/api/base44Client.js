@@ -388,6 +388,22 @@ export const storiesApi = {
 export const profileApi = {
   me: () => request("/api/profile/me"),
   update: (body) => request("/api/profile/me", { method: "PATCH", body }),
+  // PROFIL ULTRA — wspólny widok własny/publiczny, liczby z bazy.
+  publicProfile: (id) => request(`/api/profile/${encodeURIComponent(id)}/public`),
+  visit: (id) => request(`/api/profile/${encodeURIComponent(id)}/visit`, { method: "POST", body: {} }),
+  stats: (id) => request(`/api/profile/${encodeURIComponent(id)}/stats`),
+  followers: (id, { q, limit = 20, offset = 0 } = {}) => {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (q) params.set("q", q);
+    return request(`/api/profile/${encodeURIComponent(id)}/followers?${params.toString()}`);
+  },
+  following: (id, { q, limit = 20, offset = 0 } = {}) => {
+    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+    if (q) params.set("q", q);
+    return request(`/api/profile/${encodeURIComponent(id)}/following?${params.toString()}`);
+  },
+  follow: (id) => request(`/api/profile/${encodeURIComponent(id)}/follow`, { method: "POST", body: {} }),
+  unfollow: (id) => request(`/api/profile/${encodeURIComponent(id)}/follow`, { method: "DELETE" }),
 };
 
 // RODO: eksport danych (art. 15/20) i usunięcie konta (art. 17)
