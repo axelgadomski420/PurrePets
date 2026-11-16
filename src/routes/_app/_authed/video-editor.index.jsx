@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, Trash2 } from "lucide-react";
 import TopBar from "@/components/layout/TopBar";
 import { base44, storiesApi } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
@@ -17,6 +17,14 @@ const FILTERS = STUDIO_FILTERS;
 
 const SPEEDS = [0.5, 1, 1.5, 2];
 
+const STICKERS = ["🐶", "🐱", "🐾", "❤️", "⭐", "🔥", "🏆", "😂", "🦴", "🏅"];
+
+const TEXT_POSITIONS = [
+  { id: "top", label: "Góra" },
+  { id: "center", label: "Środek" },
+  { id: "bottom", label: "Dół" },
+];
+
 function VideoEditorPage() {
   const navigate = useNavigate();
   const { user, navigateToLogin } = useAuth();
@@ -26,12 +34,16 @@ function VideoEditorPage() {
   const audioCtxRef = useRef(null);
   const audioSourceRef = useRef(null);
   const coverBlobRef = useRef(null);
+  const trackRef = useRef(null);
   const [src, setSrc] = useState("");
   const [duration, setDuration] = useState(0);
   const [start, setStart] = useState(0);
   const [end, setEnd] = useState(0);
+  const [time, setTime] = useState(0);
   const [filter, setFilter] = useState(FILTERS[1]);
   const [caption, setCaption] = useState("");
+  const [textPos, setTextPos] = useState("bottom");
+  const [stickers, setStickers] = useState([]);
   const [speed, setSpeed] = useState(1);
   const [volume, setVolume] = useState(1);
   const [hasCover, setHasCover] = useState(false);
@@ -60,6 +72,8 @@ function VideoEditorPage() {
     setStart(0);
     setEnd(0);
     setDuration(0);
+    setTime(0);
+    setStickers([]);
   };
 
   const onLoaded = () => {
@@ -74,7 +88,9 @@ function VideoEditorPage() {
 
   const onTime = () => {
     const video = videoRef.current;
-    if (!video || !end) return;
+    if (!video) return;
+    setTime(video.currentTime);
+    if (!end) return;
     if (video.currentTime >= end) {
       video.pause();
       video.currentTime = start;
@@ -89,9 +105,55 @@ function VideoEditorPage() {
     video.play().catch(() => toast.error("Przeglądarka zablokowała odtwarzanie"));
   };
 
+  const seekTo = (value) => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = Math.min(Math.max(value, 0), Math.max(duration, 0));
+    setTime(video.currentTime);
+  };
+
   const setVolumeValue = (value) => {
     setVolume(value);
     if (videoRef.current) videoRef.current.volume = value;
+  };
+
+  // --- Oś czasu: przeciąganie uchwytów trim + klik = przewinięcie -------------
+  const positionFromEvent = (clientX) => {
+    const rect = trackRef.current?.getBoundingClientRect();
+    if (!rect || !rect.width) return 0;
+    const ratio = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
+    return ratio * Math.max(duration, 0);
+  };
+
+  const beginDrag = (kind) => (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const move = (e) => {
+      const value = positionFromEvent(e.clientX);
+      if (kind === "start") setStart(Math.min(value, end - 0.2));
+      else setEnd(Math.max(value, start + 0.2));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
+  const addSticker = (emoji) => {
+    setStickers((prev) => [
+      ...prev.slice(0, 11),
+      { id: \`s\${Date.now()}\`, text: emoji, x: 0.5, y: 0.4 + prev.length * 0.05, size: 72, rotation: 0 },
+    ]);
+  };
+
+  const updateSticker = (id, patch) => {
+    setStickers((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
+  };
+
+  const removeSticker = (id) => {
+    setStickers((prev) => prev.filter((s) => s.id !== id));
   };
 
   const drawFrame = (video, context, width, height) => {
@@ -109,11 +171,12 @@ function VideoEditorPage() {
         fontSize: 36,
         fontFamily: "Georgia, serif",
         fontWeight: 700,
-        position: "bottom",
+        position: textPos,
         background: true,
         backgroundColor: "rgba(5,5,7,0.58)",
         color: "#f6f3ee",
       },
+      stickers: stickers.map((s) => ({ text: s.text, x: s.x, y: s.y, size: s.size, rotation: s.rotation })),
     });
   };
 
@@ -181,7 +244,7 @@ function VideoEditorPage() {
     setTimeout(() => URL.revokeObjectURL(link.href), 5000);
   };
 
-  // Nagranie przyciętego klipu (z filtrem, napisem i DŹWIĘKIEM) do bloba WebM.
+  // Nagranie przyciętego klipu (z filtrem, napisem, naklejkami i DŹWIĘKIEM) do bloba WebM.
   const recordClip = async () => {
     if (!user) {
       navigateToLogin();
@@ -321,7 +384,8 @@ function VideoEditorPage() {
         music_title: null,
         music_url: null,
         filter: filter.id !== "none" ? filter.id : null,
-        overlay_text: null,
+        overlay_text: caption.trim() || null,
+        overlay_position: textPos,
       });
       toast.success("Relacja opublikowana — zniknie po 24 h");
       navigate({ to: "/" });
@@ -333,7 +397,9 @@ function VideoEditorPage() {
     }
   };
 
-  const stageLabel = stage === "export" ? `Nagrywam… ${progress}%` : stage === "upload" ? "Wysyłam na serwer…" : "Zapisuję publikację…";
+  const stageLabel = stage === "export" ? \`Nagrywam… \${progress}%\` : stage === "upload" ? "Wysyłam na serwer…" : "Zapisuję publikację…";
+
+  const pct = (value) => (duration > 0 ? \`(\${(value / duration) * 100).toFixed(2)}%\` : "0%");
 
   return (
     <div>
@@ -344,7 +410,7 @@ function VideoEditorPage() {
           <span className="aura-text">Edytor wideo</span>
         </h1>
         <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-          Przytnij, nałóż filtr i napis, ustaw okładkę, a potem opublikuj materiał jako Reel lub Relację.
+          Przytnij na osi czasu, nałóż filtr, napis i naklejki, ustaw okładkę, a potem opublikuj materiał jako Reel lub Relację.
           Pobieranie na urządzenie to osobna, świadoma opcja.
         </p>
 
@@ -377,34 +443,43 @@ function VideoEditorPage() {
                 style={{ filter: filter.css || "none" }}
               />
               {caption && (
-                <p className="-mt-16 px-4 pb-6 text-center font-display text-xl text-white drop-shadow">{caption}</p>
+                <p className={\`-mt-16 px-4 pb-6 text-center font-display text-xl text-white drop-shadow \${textPos === "top" ? "hidden" : ""}\`}>{caption}</p>
               )}
             </div>
             <div className="space-y-4">
-              <label className="block text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                Start {start.toFixed(1)} s
-                <input
-                  type="range"
-                  min={0}
-                  max={Math.max(duration, 0.1)}
-                  step={0.1}
-                  value={start}
-                  onChange={(event) => setStart(Math.min(Number(event.target.value), end - 0.2))}
-                  className="mt-2 w-full"
-                />
-              </label>
-              <label className="block text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
-                Koniec {end.toFixed(1)} s
-                <input
-                  type="range"
-                  min={0}
-                  max={Math.max(duration, 0.1)}
-                  step={0.1}
-                  value={end}
-                  onChange={(event) => setEnd(Math.max(Number(event.target.value), start + 0.2))}
-                  className="mt-2 w-full"
-                />
-              </label>
+              {/* Oś czasu: trim przeciąganiem, klik = przewinięcie */}
+              <div>
+                <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
+                  <span>Oś czasu</span>
+                  <span>\${start.toFixed(1)} s – \${end.toFixed(1)} s (\${Math.max(end - start, 0).toFixed(1)} s)</span>
+                </div>
+                <div
+                  ref={trackRef}
+                  onPointerDown={(e) => seekTo(positionFromEvent(e.clientX))}
+                  className="relative mt-2 h-12 w-full cursor-pointer select-none overflow-hidden rounded-xl border border-border/70 bg-black/60"
+                >
+                  <div
+                    className="absolute inset-y-0 bg-aura/25 ring-1 ring-inset ring-aura/60"
+                    style={{ left: pct(start), width: \`\${(((end - start) / Math.max(duration, 0.1)) * 100).toFixed(2)}%\` }}
+                  />
+                  <div className="absolute inset-y-0 w-0.5 bg-white" style={{ left: pct(time) }} />
+                  <button
+                    type="button"
+                    aria-label="Uchwyt początku"
+                    onPointerDown={beginDrag("start")}
+                    className="absolute inset-y-0 w-4 -translate-x-1/2 cursor-ew-resize rounded-md bg-aura/90"
+                    style={{ left: pct(start) }}
+                  />
+                  <button
+                    type="button"
+                    aria-label="Uchwyt końca"
+                    onPointerDown={beginDrag("end")}
+                    className="absolute inset-y-0 w-4 -translate-x-1/2 cursor-ew-resize rounded-md bg-aura/90"
+                    style={{ left: pct(end) }}
+                  />
+                </div>
+              </div>
+
               <label className="block text-[11px] uppercase tracking-[0.18em] text-muted-foreground">
                 Głośność podglądu {Math.round(volume * 100)}%
                 <input
@@ -426,7 +501,7 @@ function VideoEditorPage() {
                       setSpeed(value);
                       if (videoRef.current) videoRef.current.playbackRate = value;
                     }}
-                    className={`rounded-full px-3 py-1.5 text-[11px] ${speed === value ? "bg-foreground text-background" : "border border-border/70"}`}
+                    className={\`rounded-full px-3 py-1.5 text-[11px] \${speed === value ? "bg-foreground text-background" : "border border-border/70"}\`}
                   >
                     {value}×
                   </button>
@@ -438,7 +513,7 @@ function VideoEditorPage() {
                     key={item.id}
                     type="button"
                     onClick={() => setFilter(item)}
-                    className={`rounded-full px-3 py-1.5 text-[11px] ${filter.id === item.id ? "bg-aura text-background" : "border border-border/70"}`}
+                    className={\`rounded-full px-3 py-1.5 text-[11px] \${filter.id === item.id ? "bg-aura text-background" : "border border-border/70"}\`}
                   >
                     {item.label}
                   </button>
@@ -451,11 +526,74 @@ function VideoEditorPage() {
                 onChange={(event) => setCaption(event.target.value)}
                 className="w-full rounded-xl border border-border/70 bg-card/60 px-3 py-2 text-sm"
               />
+              <div className="flex flex-wrap gap-2">
+                {TEXT_POSITIONS.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setTextPos(p.id)}
+                    className={\`rounded-full px-3 py-1.5 text-[11px] \${textPos === p.id ? "bg-foreground text-background" : "border border-border/70"}\`}
+                  >
+                    Napis: {p.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Naklejki — silnik purre-studio renderuje je na klipie i okładce */}
+              <div className="rounded-[var(--radius)] border border-border/70 bg-card/60 p-3">
+                <p className="text-[9px] uppercase tracking-[0.24em] text-muted-foreground">Naklejki (max 12)</p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {STICKERS.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => addSticker(emoji)}
+                      disabled={busy || stickers.length >= 12}
+                      className="grid h-9 w-9 place-items-center rounded-xl border border-border/70 text-lg disabled:opacity-40"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+                {stickers.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {stickers.map((s, index) => (
+                      <div key={s.id} className="rounded-xl border border-border/50 bg-background/40 p-2">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span>{s.text} naklejka \${index + 1}</span>
+                          <button type="button" onClick={() => removeSticker(s.id)} className="text-muted-foreground hover:text-red-400" aria-label="Usuń naklejkę">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </div>
+                        <div className="mt-1 grid grid-cols-2 gap-2">
+                          <label className="text-[10px] text-muted-foreground">
+                            X
+                            <input type="range" min={0} max={1} step={0.01} value={s.x} onChange={(e) => updateSticker(s.id, { x: Number(e.target.value) })} className="w-full" />
+                          </label>
+                          <label className="text-[10px] text-muted-foreground">
+                            Y
+                            <input type="range" min={0} max={1} step={0.01} value={s.y} onChange={(e) => updateSticker(s.id, { y: Number(e.target.value) })} className="w-full" />
+                          </label>
+                          <label className="text-[10px] text-muted-foreground">
+                            Rozmiar
+                            <input type="range" min={24} max={180} step={2} value={s.size} onChange={(e) => updateSticker(s.id, { size: Number(e.target.value) })} className="w-full" />
+                          </label>
+                          <label className="text-[10px] text-muted-foreground">
+                            Obrót
+                            <input type="range" min={-180} max={180} step={5} value={s.rotation} onChange={(e) => updateSticker(s.id, { rotation: Number(e.target.value) })} className="w-full" />
+                          </label>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               {busy && (
                 <div>
                   <p className="text-[11px] text-aura">{stageLabel}</p>
                   <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-border/60">
-                    <div className="h-full rounded-full bg-gradient-to-r from-violet to-aura transition-all" style={{ width: `${stage === "export" ? progress : 100}%` }} />
+                    <div className="h-full rounded-full bg-gradient-to-r from-violet to-aura transition-all" style={{ width: \`\${stage === "export" ? progress : 100}%\` }} />
                   </div>
                 </div>
               )}
@@ -463,7 +601,7 @@ function VideoEditorPage() {
                 <button type="button" onClick={playTrim} disabled={busy} className="rounded-xl border border-border/70 px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] disabled:opacity-50">
                   Odtwórz fragment
                 </button>
-                <button type="button" onClick={saveCover} disabled={busy} className={`rounded-xl px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] border ${hasCover ? "border-aura text-aura" : "border-border/70"} disabled:opacity-50`}>
+                <button type="button" onClick={saveCover} disabled={busy} className={\`rounded-xl px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.16em] border \${hasCover ? "border-aura text-aura" : "border-border/70"} disabled:opacity-50\`}>
                   {hasCover ? "Okładka ustawiona ✓" : "Ustaw okładkę"}
                 </button>
               </div>
