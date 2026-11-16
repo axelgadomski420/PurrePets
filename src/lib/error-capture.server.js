@@ -1,7 +1,7 @@
 // PURRE PETS — error-capture v1, przeniesiony na Node.js (poprzednia wersja targetowała Cloudflare Workers).
 // Raportuje błędy serwera aplikacji (telemetria/logowanie), nie zmieniając odpowiedzi dla odwiedzającego.
-// Zamiast \`env\` (bindings Workera) — migawka process.env (tylko do redakcji sekretów w logach),
-// a zamiast \`waitUntil\` — fire-and-forget promise (Node utrzymuje proces; pilnujemy tylko, by
+// Zamiast `env` (bindings Workera) — migawka process.env (tylko do redakcji sekretów w logach),
+// a zamiast `waitUntil` — fire-and-forget promise (Node utrzymuje proces; pilnujemy tylko, by
 // odrzucone promise'y nie przewracały procesu).
 import { getRequest, getResponseStatus } from "@tanstack/react-start/server";
 
@@ -54,7 +54,7 @@ function scrubber() {
   return (text) => secrets.reduce((scrubbed, secret) => scrubbed.replaceAll(secret, "[redacted]"), text.toWellFormed());
 }
 
-// One \`_b44_error\` record for the error tail. A 4xx is the caller's, and an error without a message says
+// One `_b44_error` record for the error tail. A 4xx is the caller's, and an error without a message says
 // nothing: neither is recorded.
 function write(request, error, { status, fn, route }) {
   if (status < 500 || !request.headers.has(FEED_CONTEXT_HEADER) || request.signal.aborted) return;
@@ -141,7 +141,7 @@ async function readJson(response) {
 const strings = (value) =>
   typeof value === "string" ? [value] : value && typeof value === "object" ? Object.values(value).flatMap(strings) : [];
 
-// A generic \`error\` gives way to the \`details\` beside it.
+// A generic `error` gives way to the `details` beside it.
 function bodyMessage(body) {
   if (!body || typeof body !== "object") return undefined;
   const generic = body.error === "Internal server error" && "details" in body;

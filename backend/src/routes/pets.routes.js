@@ -161,7 +161,7 @@ petsRouter.get("/reminders/upcoming", requireAuth, asyncHandler(async (req, res)
     if (next < new Date(now.toDateString())) next = new Date(now.getFullYear() + 1, b.getMonth(), b.getDate());
     const diff = (next - now) / (24 * 3600 * 1000);
     if (diff > 14) return null;
-    return { kind: label, title: \`\${label === "birthday" ? "Urodziny" : "Rocznica adopcji"}: \${petName2}\`, pet_id: petId, pet_name: petName2, date: next.toISOString(), overdue: false };
+    return { kind: label, title: `${label === "birthday" ? "Urodziny" : "Rocznica adopcji"}: ${petName2}`, pet_id: petId, pet_name: petName2, date: next.toISOString(), overdue: false };
   };
   for (const p of own) {
     const b = anniversary(p.birth_date, "birthday", p.id, p.name);

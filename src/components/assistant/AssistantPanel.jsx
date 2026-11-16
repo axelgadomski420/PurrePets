@@ -27,7 +27,7 @@ export default function AssistantPanel() {
   const [messages, setMessages] = useState([
     {
       role: "assistant",
-      text: "Cześć — jestem PURRE Assistant. Zapytaj o opiekę, żywienie, zachowanie, hodowlę, ogłoszenia lub obsługę aplikacji. Możesz wybrać swojego zwierzaka jako kontekst rozmowy.",
+      text: "Witaj! Jestem Expurr — Twój przewodnik po świecie psów i kotów. Pomagam zrozumieć potrzeby zwierząt, ich zachowanie, żywienie, pielęgnację i profilaktykę. Możesz wybrać swojego pupila, aby odpowiedzi uwzględniały jego dane.",
       source: "rules",
     },
   ]);
@@ -108,7 +108,7 @@ export default function AssistantPanel() {
         type="button"
         onClick={() => setOpen((v) => !v)}
         className="fixed bottom-24 right-4 z-40 grid h-12 w-12 place-items-center rounded-full bg-gradient-to-br from-violet to-aura text-black shadow-lg shadow-aura/20 lg:bottom-8"
-        aria-label="PURRE Assistant"
+        aria-label="Expurr — ekspert psów i kotów"
       >
         {open ? <X className="h-5 w-5" /> : <Bot className="h-5 w-5" />}
       </button>
@@ -118,7 +118,7 @@ export default function AssistantPanel() {
           <div className="flex items-center gap-2 border-b border-border/60 px-4 py-3">
             <Sparkles className="h-4 w-4 text-aura" />
             <div className="min-w-0 flex-1">
-              <p className="font-display text-sm">PURRE Assistant</p>
+              <p className="font-display text-sm">Expurr — ekspert psów i kotów</p>
               <p className="text-[10px] text-muted-foreground">
                 {health?.ollama ? `Ollama · ${health.model ?? "lokalny model"}` : "Łączę z modelem…"}
               </p>

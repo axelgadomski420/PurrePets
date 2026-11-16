@@ -92,7 +92,7 @@ function wrapText(context, text, maxWidth) {
   let line = "";
 
   for (const word of words) {
-    const candidate = line ? \`\${line} \${word}\` : word;
+    const candidate = line ? `${line} ${word}` : word;
 
     if (line && context.measureText(candidate).width > maxWidth) {
       lines.push(line);
@@ -138,7 +138,7 @@ function drawText(context, width, height, text, options = {}) {
   const padding = fontSize * 0.32;
 
   context.save();
-  context.font = \`\${options.fontWeight || 700} \${fontSize}px \${options.fontFamily || "Arial, sans-serif"}\`;
+  context.font = `${options.fontWeight || 700} ${fontSize}px ${options.fontFamily || "Arial, sans-serif"}`;
   context.textAlign = options.align || "center";
   context.textBaseline = "middle";
 
@@ -201,7 +201,7 @@ function drawTextLayer(context, width, height, layer = {}) {
   const padding = fontSize * 0.32;
 
   context.save();
-  context.font = \`\${layer.fontWeight || 700} \${fontSize}px \${layer.fontFamily || "Arial, sans-serif"}\`;
+  context.font = `${layer.fontWeight || 700} ${fontSize}px ${layer.fontFamily || "Arial, sans-serif"}`;
 
   // Pomiar i zawijanie muszą używać tej samej czcionki co renderowanie.
   const lines = wrapText(context, value, maxWidth - padding * 2).slice(0, 8);
@@ -290,9 +290,9 @@ export function renderStudioFrame(media, canvas, options = {}) {
   context.fillRect(0, 0, width, height);
   const filterParts = [
     preset.id === "none" ? "" : preset.css,
-    \`brightness(\${brightness}%)\`,
-    \`contrast(\${contrast}%)\`,
-    \`saturate(\${saturation}%)\`,
+    `brightness(${brightness}%)`,
+    `contrast(${contrast}%)`,
+    `saturate(${saturation}%)`,
   ].filter(Boolean);
 
   // Temperatura (ciepło/zimno) i rozmycie — dodatkowe korekcje obrazu.
@@ -375,7 +375,7 @@ export function renderStudioFrame(media, canvas, options = {}) {
       context.rotate(
         (Number(sticker.rotation) || 0) * Math.PI / 180
       );
-      context.font = \`\${clamp(sticker.size ?? 64, 18, 180)}px Arial, sans-serif\`;
+      context.font = `${clamp(sticker.size ?? 64, 18, 180)}px Arial, sans-serif`;
       context.textAlign = "center";
       context.textBaseline = "middle";
       context.fillText(value, 0, 0);
@@ -589,8 +589,11 @@ function scheduleGain(gain, ctx, startAt, duration, { volume = 1, fadeIn = 0, fa
  * Zwraca { blob, mimeType, extension }. Rzuca ExportCancelled przy anulowaniu.
  */
 export async function exportStudioVideo(options = {}) {
-  const clips = (options.clips ?? []).filter((c) => c?.video?.videoWidth);
-  if (!clips.length) throw new Error("Brak klipów wideo do eksportu.");
+  const clips = (options.clips ?? []).filter((clip) =>
+    Boolean(clip?.video?.videoWidth || clip?.image?.naturalWidth)
+  );
+
+  if (!clips.length) throw new Error("Brak zdjęć lub klipów wideo do eksportu.");
   if (typeof MediaRecorder === "undefined") {
     throw new Error("Ta przeglądarka nie obsługuje nagrywania wideo (MediaRecorder).");
   }
@@ -604,52 +607,66 @@ export async function exportStudioVideo(options = {}) {
   const shouldCancel = options.shouldCancel ?? (() => false);
   const onProgress = options.onProgress ?? (() => {});
   const onWarning = options.onWarning ?? (() => {});
-
   const canvas = createStudioCanvas(width, height);
   const context = canvas.getContext("2d", { alpha: false });
   const filterSupported = canvasSupportsFilter(context);
   const overlays = options.overlays ?? {};
 
-  const totalSpan = clips.reduce((sum, c) => sum + Math.max((c.trimEnd ?? 0) - (c.trimStart ?? 0), 0.1), 0);
+  const spanOf = (clip) => {
+    if (clip.image) return Math.max(1, Number(clip.duration ?? clip.trimEnd) || 3);
+    const start = Math.max(0, Number(clip.trimStart) || 0);
+    const end = Number(clip.trimEnd) || clip.video.duration || start + 0.1;
+    return Math.max(0.1, end - start);
+  };
+
+  const totalSpan = clips.reduce((sum, clip) => sum + spanOf(clip), 0);
   let recorded = 0;
 
-  // --- Audio: jeden graf dla całego eksportu ---
   const audio = options.audio ?? {};
   const audioCtx = studioAudioContext();
   let destStream = null;
   const connected = [];
+
   if (audioCtx) {
     try {
       await audioCtx.resume().catch(() => {});
-      const dest = audioCtx.createMediaStreamDestination();
-      destStream = dest.stream;
-      const originalVolume = audio.muteOriginal ? 0 : Math.min(Math.max(audio.originalVolume ?? 1, 0), 1.5);
+      const destination = audioCtx.createMediaStreamDestination();
+      destStream = destination.stream;
+
+      const originalVolume = audio.muteOriginal
+        ? 0
+        : Math.min(Math.max(audio.originalVolume ?? 1, 0), 1.5);
+
       for (const clip of clips) {
+        if (!clip.video) continue;
         const source = mediaSourceFor(audioCtx, clip.video);
         if (!source) continue;
+
         const gain = audioCtx.createGain();
-        const span = Math.max((clip.trimEnd ?? 0) - (clip.trimStart ?? 0), 0.1);
-        scheduleGain(gain, audioCtx, 0, 1, { volume: originalVolume }); // stała głośność oryginału
         source.connect(gain);
-        gain.connect(dest);
-        connected.push({ source, gain, perClipVolume: originalVolume, span });
+        gain.connect(destination);
+        connected.push({ source, gain, original: true, volume: originalVolume });
       }
+
       for (const track of [audio.music, audio.voice]) {
         if (!track?.element) continue;
         const source = mediaSourceFor(audioCtx, track.element);
         if (!source) {
-          onWarning("Nie udało się podpiąć ścieżki audio (CORS) — eksport bez tej ścieżki.");
+          onWarning("Nie udało się podłączyć ścieżki audio — eksport bez tej ścieżki.");
           continue;
         }
+
         const gain = audioCtx.createGain();
         source.connect(gain);
-        gain.connect(dest);
+        gain.connect(destination);
         connected.push({ source, gain, track });
       }
     } catch {
       destStream = null;
-      onWarning("Miks audio niedostępny — eksport bez dźwięku.");
+      onWarning("Miks audio niedostępny — eksport może być bez dźwięku.");
     }
+  } else if (audio.music?.element || audio.voice?.element) {
+    onWarning("AudioContext jest niedostępny — eksport może być bez muzyki.");
   }
 
   const stream = canvas.captureStream(fps);
@@ -661,25 +678,15 @@ export async function exportStudioVideo(options = {}) {
     mimeType: mime,
     videoBitsPerSecond: options.videoBitsPerSecond ?? 4_000_000,
   });
+
   const chunks = [];
   recorder.ondataavailable = (event) => {
     if (event.data?.size) chunks.push(event.data);
   };
-  const stopped = new Promise((resolve) => {
-    recorder.onstop = () => resolve();
-  });
 
-  const cleanup = () => {
-    try {
-      for (const clip of clips) clip.video.pause();
-      for (const item of connected) {
-        try { item.gain.disconnect(); } catch { /* już rozłączony */ }
-      }
-      for (const track of stream.getTracks()) track.stop();
-      canvas.width = 1;
-      canvas.height = 1;
-    } catch { /* cleanup nie może maskować błędu eksportu */ }
-  };
+  const stopped = new Promise((resolve) => {
+    recorder.onstop = resolve;
+  });
 
   class ExportCancelled extends Error {
     constructor() {
@@ -688,66 +695,117 @@ export async function exportStudioVideo(options = {}) {
     }
   }
 
-  try {
-    recorder.start(250);
-    for (let index = 0; index < clips.length; index += 1) {
-      if (shouldCancel()) throw new ExportCancelled();
-      const clip = clips[index];
-      const trimStart = Math.max(clip.trimStart ?? 0, 0);
-      const trimEnd = Math.max(clip.trimEnd ?? clip.video.duration ?? 0, trimStart + 0.1);
-      const span = trimEnd - trimStart;
-      const speed = Math.min(Math.max(clip.speed ?? 1, 0.25), 4);
-      const preset = getStudioFilter(clip.filter);
-
-      await waitForSeek(clip.video, trimStart);
-
-      // FIX: play() może się nie udać (autoplay policy) — nie wieszamy eksportu.
-      const played = clip.video.play();
-      const started = await Promise.race([
-        played.then(() => true).catch(() => false),
-        sleep(2500).then(() => false),
-      ]);
-      if (!started || clip.video.paused) {
-        throw new Error("Przeglądarka zablokowała odtwarzanie wideo — kliknij w dowolnym miejscu strony i spróbuj ponownie.");
+  const cleanup = () => {
+    try {
+      for (const clip of clips) clip.video?.pause();
+      for (const track of [audio.music, audio.voice]) {
+        track?.element?.pause?.();
       }
-      clip.video.playbackRate = speed;
-
-      // Podpięcie audio tego klipu: głośność oryginału per klip.
-      const clipAudio = connected.find((item) => item.source && studioMediaSources.get(clip.video) === item.source);
-      if (clipAudio && audioCtx) {
-        scheduleGain(clipAudio.gain, audioCtx, audioCtx.currentTime, span, {
-          volume: audio.muteOriginal ? 0 : (audio.originalVolume ?? 1),
-        });
-      }
-      // Muzyka/voiceover: fade liczony od początku całego eksportu.
       for (const item of connected) {
-        if (!item.track || !audioCtx) continue;
-        if (index === 0) {
-          scheduleGain(item.gain, audioCtx, audioCtx.currentTime, totalSpan, item.track);
+        try { item.gain.disconnect(); } catch { /* już rozłączony */ }
+      }
+      for (const track of stream.getTracks()) track.stop();
+      canvas.width = 1;
+      canvas.height = 1;
+    } catch {
+      /* Sprzątanie nie może maskować błędu eksportu. */
+    }
+  };
+
+  const paint = (clip) => {
+    if (shouldCancel()) return false;
+
+    const media = clip.video ?? clip.image;
+    const preset = getStudioFilter(clip.filter);
+
+    renderStudioFrame(media, canvas, {
+      width,
+      height,
+      format: options.format ?? "reel",
+      filter: filterSupported ? preset.id : "none",
+      brightness: clip.brightness ?? 100,
+      contrast: clip.contrast ?? 100,
+      saturation: clip.saturation ?? 100,
+      temperature: clip.temperature ?? 0,
+      vignette: clip.vignette ?? 0,
+      grain: clip.grain ?? 0,
+      blur: clip.blur ?? 0,
+      rotation: clip.rotation,
+      flipX: clip.flipX,
+      flipY: clip.flipY,
+      zoom: clip.zoom,
+      offsetX: clip.offsetX,
+      offsetY: clip.offsetY,
+      textLayers: overlays.textLayers,
+      stickers: overlays.stickers,
+    });
+
+    return true;
+  };
+
+  try {
+    // Muzyka i voiceover startują od początku filmu.
+    for (const track of [audio.music, audio.voice]) {
+      const element = track?.element;
+      if (!element) continue;
+      try {
+        element.pause();
+        element.currentTime = 0;
+        await element.play();
+      } catch {
+        onWarning("Przeglądarka nie uruchomiła jednej ze ścieżek audio.");
+      }
+    }
+
+    recorder.start(250);
+
+    for (const clip of clips) {
+      if (shouldCancel()) throw new ExportCancelled();
+
+      const span = spanOf(clip);
+      const start = Math.max(0, Number(clip.trimStart) || 0);
+      const end = clip.video ? start + span : span;
+      const speed = Math.min(Math.max(clip.speed ?? 1, 0.25), 4);
+
+      if (clip.video) {
+        await waitForSeek(clip.video, start);
+        clip.video.playbackRate = speed;
+
+        const played = clip.video.play();
+        const started = await Promise.race([
+          played.then(() => true).catch(() => false),
+          sleep(2500).then(() => false),
+        ]);
+
+        if (!started || clip.video.paused) {
+          throw new Error("Nie udało się uruchomić filmu do eksportu. Kliknij stronę i spróbuj ponownie.");
         }
       }
 
-      const paint = () => {
-        if (shouldCancel()) return false;
-        renderStudioFrame(clip.video, canvas, {
-          width,
-          height,
-          format: options.format ?? "reel",
-          filter: filterSupported ? preset.id : "none",
-          brightness: clip.brightness ?? 100,
-          contrast: clip.contrast ?? 100,
-          saturation: clip.saturation ?? 100,
-          rotation: clip.rotation,
-          flipX: clip.flipX,
-          flipY: clip.flipY,
-          zoom: clip.zoom,
-          offsetX: clip.offsetX,
-          offsetY: clip.offsetY,
-          textLayers: overlays.textLayers,
-          stickers: overlays.stickers,
-        });
-        return true;
-      };
+      // Głośność dźwięku oryginalnego danego klipu.
+      if (clip.video && audioCtx) {
+        const item = connected.find((entry) =>
+          entry.original && studioMediaSources.get(clip.video) === entry.source
+        );
+        if (item) {
+          scheduleGain(item.gain, audioCtx, audioCtx.currentTime, span, {
+            volume: audio.muteOriginal ? 0 : (audio.originalVolume ?? 1),
+          });
+        }
+      }
+
+      // Fade muzyki i voiceoveru przez całą długość projektu.
+      if (audioCtx) {
+        for (const item of connected) {
+          if (!item.track) continue;
+          if (!item.scheduled) {
+            scheduleGain(item.gain, audioCtx, audioCtx.currentTime, totalSpan, item.track);
+            item.scheduled = true;
+          }
+        }
+      }
+
+      const startedAt = performance.now();
 
       await new Promise((resolve, reject) => {
         const loop = () => {
@@ -755,20 +813,36 @@ export async function exportStudioVideo(options = {}) {
             reject(new ExportCancelled());
             return;
           }
-          if (clip.video.currentTime >= trimEnd || clip.video.ended) {
-            clip.video.pause();
+
+          const elapsed = clip.video
+            ? Math.max(0, clip.video.currentTime - start) / speed
+            : (performance.now() - startedAt) / 1000;
+
+          const finished = clip.video
+            ? clip.video.currentTime >= end || clip.video.ended
+            : elapsed >= span;
+
+          if (finished) {
+            clip.video?.pause();
             recorded += span;
             onProgress(Math.min(99, Math.round((recorded / totalSpan) * 100)));
             resolve();
             return;
           }
-          if (!paint()) {
+
+          if (!paint(clip)) {
             reject(new ExportCancelled());
             return;
           }
-          onProgress(Math.min(99, Math.round(((recorded + (clip.video.currentTime - trimStart)) / totalSpan) * 100)));
+
+          onProgress(Math.min(
+            99,
+            Math.round(((recorded + Math.min(elapsed, span)) / totalSpan) * 100)
+          ));
+
           requestAnimationFrame(loop);
         };
+
         loop();
       });
     }
@@ -776,13 +850,21 @@ export async function exportStudioVideo(options = {}) {
     onProgress(100);
     recorder.stop();
     await stopped;
+
     const blob = new Blob(chunks, { type: mime });
     if (!blob.size) throw new Error("Eksport nie wygenerował danych wideo.");
-    return { blob, mimeType: mime, extension: mime.includes("mp4") ? "mp4" : "webm" };
-  } catch (err) {
-    try { recorder.stop(); } catch { /* już zatrzymany */ }
+
+    return {
+      blob,
+      mimeType: mime,
+      extension: mime.includes("mp4") ? "mp4" : "webm",
+    };
+  } catch (error) {
+    try {
+      if (recorder.state !== "inactive") recorder.stop();
+    } catch { /* rejestrator mógł już się zatrzymać */ }
     await stopped;
-    throw err;
+    throw error;
   } finally {
     cleanup();
   }

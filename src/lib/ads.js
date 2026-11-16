@@ -32,7 +32,7 @@ export function interleaveAds(items, { seed = "purre", enabled = true } = {}) {
     if ((i + 1) % every === 0) {
       out.push({
         type: "ad",
-        id: \`google-\${seed}-\${i + 1}\`,
+        id: `google-${seed}-${i + 1}`,
       });
     }
   }

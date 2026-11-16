@@ -49,8 +49,8 @@ stripeRouter.post(
     const amount = plan === "year" ? PRO_YEAR_PLN : PRO_MONTH_PLN;
     const body = new URLSearchParams();
     body.set("mode", "subscription");
-    body.set("success_url", \`\${origin}/rewards?pro=success&session_id={CHECKOUT_SESSION_ID}\`);
-    body.set("cancel_url", \`\${origin}/rewards?pro=cancelled\`);
+    body.set("success_url", `${origin}/rewards?pro=success&session_id={CHECKOUT_SESSION_ID}`);
+    body.set("cancel_url", `${origin}/rewards?pro=cancelled`);
     body.set("client_reference_id", req.user.id);
     body.set("customer_email", req.user.email);
     body.set("metadata[user_id]", req.user.id);
@@ -68,7 +68,7 @@ stripeRouter.post(
     const response = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
       headers: {
-        Authorization: \`Bearer \${config.stripeSecret}\`,
+        Authorization: `Bearer ${config.stripeSecret}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body,
@@ -99,8 +99,8 @@ stripeRouter.post(
     const origin = config.publicBaseUrl.replace(/\/$/, "");
     const body = new URLSearchParams();
     body.set("mode", "payment");
-    body.set("success_url", \`\${origin}/rewards?paid=1&session_id={CHECKOUT_SESSION_ID}\`);
-    body.set("cancel_url", \`\${origin}/rewards?paid=0\`);
+    body.set("success_url", `${origin}/rewards?paid=1&session_id={CHECKOUT_SESSION_ID}`);
+    body.set("cancel_url", `${origin}/rewards?paid=0`);
     body.set("client_reference_id", req.user.id);
     body.set("customer_email", req.user.email);
     body.set("metadata[user_id]", req.user.id);
@@ -109,12 +109,12 @@ stripeRouter.post(
     body.set("line_items[0][quantity]", "1");
     body.set("line_items[0][price_data][currency]", pack.currency);
     body.set("line_items[0][price_data][unit_amount]", String(pack.amount));
-    body.set("line_items[0][price_data][product_data][name]", \`PURRE Coins — \${pack.label}\`);
+    body.set("line_items[0][price_data][product_data][name]", `PURRE Coins — ${pack.label}`);
 
     const response = await fetch("https://api.stripe.com/v1/checkout/sessions", {
       method: "POST",
       headers: {
-        Authorization: \`Bearer \${config.stripeSecret}\`,
+        Authorization: `Bearer ${config.stripeSecret}`,
         "Content-Type": "application/x-www-form-urlencoded",
       },
       body,
@@ -140,7 +140,7 @@ function stripeSignatureOk(req) {
       })
   );
   if (!parts.t) return false;
-  const signed = \`\${parts.t}.\${req.rawBody.toString("utf8")}\`;
+  const signed = `${parts.t}.${req.rawBody.toString("utf8")}`;
   const expected = crypto.createHmac("sha256", secret).update(signed).digest("hex");
   const signatures = String(header)
     .split(",")
@@ -211,7 +211,7 @@ async function activatePro(session) {
   await notify(userId, {
     type: "system",
     title: "Purre Pets PRO aktywne 🏆",
-    body: \`Subskrypcja \${plan === "year" ? "roczna" : "miesięczna"} opłacona — reklamy wyłączone, badge PRO nadany.\`,
+    body: `Subskrypcja ${plan === "year" ? "roczna" : "miesięczna"} opłacona — reklamy wyłączone, badge PRO nadany.`,
     link: "/rewards",
   });
   return subscription;
@@ -258,8 +258,8 @@ stripeRouter.get(
   asyncHandler(async (req, res) => {
     const sessionId = String(req.query.session_id ?? "").trim();
     if (!sessionId || !config.stripeSecret) throw badRequest("Brak session_id");
-    const response = await fetch(\`https://api.stripe.com/v1/checkout/sessions/\${encodeURIComponent(sessionId)}\`, {
-      headers: { Authorization: \`Bearer \${config.stripeSecret}\` },
+    const response = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(sessionId)}`, {
+      headers: { Authorization: `Bearer ${config.stripeSecret}` },
     });
     const session = await response.json();
     if (!response.ok || session.payment_status !== "paid") throw badRequest("Płatność nie została potwierdzona");
@@ -279,7 +279,7 @@ stripeRouter.get(
       await notify(req.user.id, {
         type: "system",
         title: "PURRE Coins doładowane 🪙",
-        body: \`+\${result.coins} monet na koncie (płatność potwierdzona).\`,
+        body: `+${result.coins} monet na koncie (płatność potwierdzona).`,
         link: "/rewards",
       });
     }

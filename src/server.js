@@ -1,4 +1,4 @@
-// PURRE PETS — custom server entry TanStack Start: uniwersalny handler \`{ fetch }\` (Request → Response),
+// PURRE PETS — custom server entry TanStack Start: uniwersalny handler `{ fetch }` (Request → Response),
 // zgodny z dokumentacją (guide/server-entry-point) i z runtime Node.js/Nitro. Raportowanie błędów tras
 // (error-capture) działa jak poprzednio; dla odwiedzającego odpowiedź jest niezmieniona.
 import { createStartHandler, defaultStreamHandler } from "@tanstack/react-start/server";

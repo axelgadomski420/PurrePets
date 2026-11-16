@@ -26,7 +26,7 @@ if (typeof window !== "undefined") {
 
 export class ApiError extends Error {
   constructor(status, payload) {
-    super(payload?.error?.message || payload?.detail || \`Request failed (\${status})\`);
+    super(payload?.error?.message || payload?.detail || `Request failed (${status})`);
     this.status = status;
     this.data = payload;
   }
@@ -44,9 +44,9 @@ function token() {
 async function request(path, { method = "GET", body, formData } = {}) {
   const headers = {};
   const current = token();
-  if (current) headers.Authorization = \`Bearer \${current}\`;
+  if (current) headers.Authorization = `Bearer ${current}`;
   if (formData === undefined) headers["Content-Type"] = "application/json";
-  const response = await fetch(\`\${API_URL}\${path}\`, {
+  const response = await fetch(`${API_URL}${path}`, {
     method,
     headers,
     credentials: "omit",
@@ -64,9 +64,9 @@ async function request(path, { method = "GET", body, formData } = {}) {
 async function requestBlob(path) {
   const headers = {};
   const current = token();
-  if (current) headers.Authorization = \`Bearer \${current}\`;
+  if (current) headers.Authorization = `Bearer ${current}`;
 
-  const response = await fetch(\`\${API_URL}\${path}\`, {
+  const response = await fetch(`${API_URL}${path}`, {
     method: "GET",
     headers,
     credentials: "omit",
@@ -123,36 +123,36 @@ function pageOptions(opts = {}) {
   if (opts.offset != null) params.set("offset", String(opts.offset));
   if (opts.skip != null) params.set("skip", String(opts.skip));
   const qs = params.toString();
-  return qs ? \`?\${qs}\` : "";
+  return qs ? `?${qs}` : "";
 }
 
 function createEntity(name) {
-  const base = \`/api/entities/\${ENTITY_PATHS[name]}\`;
+  const base = `/api/entities/${ENTITY_PATHS[name]}`;
   return {
     async list(params, opts) {
-      return request(\`\${base}/list\${pageOptions({ ...(params ?? {}), ...(opts ?? {}) })}\`);
+      return request(`${base}/list${pageOptions({ ...(params ?? {}), ...(opts ?? {}) })}`);
     },
     async filter(where, opts) {
-      return request(\`\${base}/query\`, {
+      return request(`${base}/query`, {
         method: "POST",
         body: { where: where ?? {}, ...(opts ?? {}) },
       });
     },
     async count(where) {
-      const result = await request(\`\${base}/count\`, { method: "POST", body: { where: where ?? {} } });
+      const result = await request(`${base}/count`, { method: "POST", body: { where: where ?? {} } });
       return typeof result === "number" ? result : result?.count ?? 0;
     },
     async get(id) {
-      return request(\`\${base}/\${id}\`);
+      return request(`${base}/${id}`);
     },
     async create(data) {
       return request(base, { method: "POST", body: data ?? {} });
     },
     async update(id, data) {
-      return request(\`\${base}/\${id}\`, { method: "PATCH", body: data ?? {} });
+      return request(`${base}/${id}`, { method: "PATCH", body: data ?? {} });
     },
     async delete(id) {
-      return request(\`\${base}/\${id}\`, { method: "DELETE" });
+      return request(`${base}/${id}`, { method: "DELETE" });
     },
     subscribe(callback) {
       const client = getSocket();
@@ -219,10 +219,10 @@ export const auth = {
     auth.setToken(null);
   },
   loginWithProvider: (provider, returnTo) => {
-    window.location.assign(\`/login?returnTo=\${encodeURIComponent(returnTo ?? window.location.href)}\`);
+    window.location.assign(`/login?returnTo=${encodeURIComponent(returnTo ?? window.location.href)}`);
   },
   redirectToLogin: (returnTo) => {
-    window.location.assign(\`/login?returnTo=\${encodeURIComponent(returnTo ?? window.location.href)}\`);
+    window.location.assign(`/login?returnTo=${encodeURIComponent(returnTo ?? window.location.href)}`);
   },
 };
 
@@ -232,20 +232,20 @@ export const functions = {
   submitScore: (data) => request("/api/games/submit", { method: "POST", body: data }),
   redeemReward: (data) => request("/api/rewards/redeem", { method: "POST", body: data }),
   createListing: (data) => request("/api/listings/with-cost", { method: "POST", body: { data } }),
-  moderateListing: (data) => request(\`/api/listings/\${data.listing_id}/moderate\`, { method: "POST", body: {} }),
+  moderateListing: (data) => request(`/api/listings/${data.listing_id}/moderate`, { method: "POST", body: {} }),
   askAssistant: (data) => request("/api/assistant/ask", { method: "POST", body: data }),
   aiChat: (data) => request("/api/ai/chat", { method: "POST", body: data }),
   aiHealth: () => request("/api/ai/health"),
 };
 
 export const social = {
-  events: (city) => request(\`/api/social/events\${city ? \`?city=\${encodeURIComponent(city)}\` : ""}\`),
+  events: (city) => request(`/api/social/events${city ? `?city=${encodeURIComponent(city)}` : ""}`),
   createEvent: (body) => request("/api/social/events", { method: "POST", body }),
-  buyTicket: (id) => request(\`/api/social/events/\${id}/ticket\`, { method: "POST", body: {} }),
-  groups: (type) => request(\`/api/social/groups\${type && type !== "all" ? \`?type=\${encodeURIComponent(type)}\` : ""}\`),
+  buyTicket: (id) => request(`/api/social/events/${id}/ticket`, { method: "POST", body: {} }),
+  groups: (type) => request(`/api/social/groups${type && type !== "all" ? `?type=${encodeURIComponent(type)}` : ""}`),
   createGroup: (body) => request("/api/social/groups", { method: "POST", body }),
-  joinGroup: (id) => request(\`/api/social/groups/\${id}/join\`, { method: "POST", body: {} }),
-  leaveGroup: (id) => request(\`/api/social/groups/\${id}/leave\`, { method: "POST", body: {} }),
+  joinGroup: (id) => request(`/api/social/groups/${id}/join`, { method: "POST", body: {} }),
+  leaveGroup: (id) => request(`/api/social/groups/${id}/leave`, { method: "POST", body: {} }),
   myVerification: () => request("/api/social/verification/mine"),
   submitVerification: (body) => request("/api/social/verification", { method: "POST", body }),
 };
@@ -258,41 +258,41 @@ export const groupsApi = {
     if (type && type !== "all") params.set("type", type);
     if (mine) params.set("mine", "1");
     const qs = params.toString();
-    return request(\`/api/groups\${qs ? \`?\${qs}\` : ""}\`);
+    return request(`/api/groups${qs ? `?${qs}` : ""}`);
   },
-  get: (id) => request(\`/api/groups/\${id}\`),
+  get: (id) => request(`/api/groups/${id}`),
   create: (body) => request("/api/groups", { method: "POST", body }),
-  update: (id, body) => request(\`/api/groups/\${id}\`, { method: "PATCH", body }),
-  join: (id) => request(\`/api/groups/\${id}/join\`, { method: "POST", body: {} }),
-  leave: (id) => request(\`/api/groups/\${id}/leave\`, { method: "POST", body: {} }),
-  post: (id, body) => request(\`/api/groups/\${id}/posts\`, { method: "POST", body }),
+  update: (id, body) => request(`/api/groups/${id}`, { method: "PATCH", body }),
+  join: (id) => request(`/api/groups/${id}/join`, { method: "POST", body: {} }),
+  leave: (id) => request(`/api/groups/${id}/leave`, { method: "POST", body: {} }),
+  post: (id, body) => request(`/api/groups/${id}/posts`, { method: "POST", body }),
 };
 
 // Globalna wyszukiwarka
 export const searchApi = {
-  search: (q, type = "all") => request(\`/api/search?q=\${encodeURIComponent(q)}&type=\${encodeURIComponent(type)}\`),
+  search: (q, type = "all") => request(`/api/search?q=${encodeURIComponent(q)}&type=${encodeURIComponent(type)}`),
 };
 
 // Powiadomienia
 export const notificationsApi = {
-  list: (unreadOnly = false) => request(\`/api/notifications\${unreadOnly ? "?unread=1" : ""}\`),
-  markRead: (id) => request(\`/api/notifications/\${id}/read\`, { method: "POST", body: {} }),
+  list: (unreadOnly = false) => request(`/api/notifications${unreadOnly ? "?unread=1" : ""}`),
+  markRead: (id) => request(`/api/notifications/${id}/read`, { method: "POST", body: {} }),
   markAllRead: () => request("/api/notifications/read-all", { method: "POST", body: {} }),
 };
 
 // Messenger (media, odczyty, reakcje, usuwanie)
 export const messagesApi = {
-  conversations: (q) => request(\`/api/messages/conversations\${q ? \`?q=\${encodeURIComponent(q)}\` : ""}\`),
+  conversations: (q) => request(`/api/messages/conversations${q ? `?q=${encodeURIComponent(q)}` : ""}`),
   messages: (conversationId, q) =>
-    request(\`/api/messages/conversations/\${conversationId}/messages\${q ? \`?q=\${encodeURIComponent(q)}\` : ""}\`),
+    request(`/api/messages/conversations/${conversationId}/messages${q ? `?q=${encodeURIComponent(q)}` : ""}`),
   history: (conversationId, before, limit = 50) =>
-    request(\`/api/messages/conversations/\${conversationId}/messages?before=\${encodeURIComponent(before ?? "")}&limit=\${limit}\`),
+    request(`/api/messages/conversations/${conversationId}/messages?before=${encodeURIComponent(before ?? "")}&limit=${limit}`),
   send: (body) => request("/api/messages/send", { method: "POST", body }),
-  markRead: (id) => request(\`/api/messages/\${id}/read\`, { method: "POST", body: {} }),
-  react: (id, emoji) => request(\`/api/messages/\${id}/react\`, { method: "POST", body: { emoji } }),
-  remove: (id) => request(\`/api/messages/\${id}\`, { method: "DELETE" }),
-  typingSignal: (conversationId) => request(\`/api/messages/typing/\${conversationId}\`, { method: "POST", body: {} }),
-  typing: (conversationId) => request(\`/api/messages/typing/\${conversationId}\`),
+  markRead: (id) => request(`/api/messages/${id}/read`, { method: "POST", body: {} }),
+  react: (id, emoji) => request(`/api/messages/${id}/react`, { method: "POST", body: { emoji } }),
+  remove: (id) => request(`/api/messages/${id}`, { method: "DELETE" }),
+  typingSignal: (conversationId) => request(`/api/messages/typing/${conversationId}`, { method: "POST", body: {} }),
+  typing: (conversationId) => request(`/api/messages/typing/${conversationId}`),
 };
 
 // Muzyka / audio do rolek
@@ -302,17 +302,17 @@ export const reelsAudioApi = {
     if (q) params.set("q", q);
     if (mood) params.set("mood", mood);
     const qs = params.toString();
-    return request(\`/api/reels-audio\${qs ? \`?\${qs}\` : ""}\`);
+    return request(`/api/reels-audio${qs ? `?${qs}` : ""}`);
   },
   add: (body) => request("/api/reels-audio", { method: "POST", body }),
-  use: (id) => request(\`/api/reels-audio/\${id}/use\`, { method: "POST", body: {} }),
+  use: (id) => request(`/api/reels-audio/${id}/use`, { method: "POST", body: {} }),
 };
 
 // Premium — wyłącznie subskrypcja PLN (Purre Pets PRO)
 export const premiumApi = {
   status: () => request("/api/premium/status"),
   subscribe: (plan = "month") => request("/api/premium/subscribe", { method: "POST", body: { plan } }),
-  confirm: (sessionId) => request(\`/api/premium/confirm?session_id=\${encodeURIComponent(sessionId)}\`),
+  confirm: (sessionId) => request(`/api/premium/confirm?session_id=${encodeURIComponent(sessionId)}`),
   proCheckout: (plan = "month") => request("/api/stripe/create-pro-checkout", { method: "POST", body: { plan } }),
 };
 
@@ -323,45 +323,53 @@ export const reportsApi = {
 
 export const adminApi = {
   overview: () => request("/api/admin/overview"),
-  reviewVerification: (id, body) => request(\`/api/admin/verification/\${id}\`, { method: "POST", body }),
-  reviewListing: (id, body) => request(\`/api/admin/listings/\${id}\`, { method: "POST", body }),
-  reviewPost: (id, body) => request(\`/api/admin/posts/\${id}\`, { method: "POST", body }),
-  users: (q) => request(\`/api/admin/users\${q ? \`?q=\${encodeURIComponent(q)}\` : ""}\`),
-  updateUser: (id, body) => request(\`/api/admin/users/\${id}\`, { method: "PATCH", body }),
+  mediaModeration: () => request("/api/admin/media-moderation"),
+  reviewMedia: (id, body) => request(
+    `/api/admin/media-moderation/${encodeURIComponent(id)}`,
+    { method: "POST", body }
+  ),
+  getMediaPreview: (id) => requestBlob(
+    `/api/admin/media-moderation/${encodeURIComponent(id)}/file`
+  ),
+  reviewVerification: (id, body) => request(`/api/admin/verification/${id}`, { method: "POST", body }),
+  reviewListing: (id, body) => request(`/api/admin/listings/${id}`, { method: "POST", body }),
+  reviewPost: (id, body) => request(`/api/admin/posts/${id}`, { method: "POST", body }),
+  users: (q) => request(`/api/admin/users${q ? `?q=${encodeURIComponent(q)}` : ""}`),
+  updateUser: (id, body) => request(`/api/admin/users/${id}`, { method: "PATCH", body }),
   analyzeVerification: (id) => request("/api/ai/verify-breeder", { method: "POST", body: { id } }),
-  getVerificationDocument: (id) => requestBlob(\`/api/admin/verification/\${encodeURIComponent(id)}/document\`),
-  resolveReport: (id, body) => request(\`/api/admin/reports/\${id}\`, { method: "POST", body }),
-  deleteComment: (id) => request(\`/api/admin/comments/\${id}\`, { method: "DELETE" }),
+  getVerificationDocument: (id) => requestBlob(`/api/admin/verification/${encodeURIComponent(id)}/document`),
+  resolveReport: (id, body) => request(`/api/admin/reports/${id}`, { method: "POST", body }),
+  deleteComment: (id) => request(`/api/admin/comments/${id}`, { method: "DELETE" }),
 };
 
 export const billing = {
   packages: () => request("/api/stripe/packages"),
   checkout: (packageId) => request("/api/stripe/create-checkout", { method: "POST", body: { package_id: packageId } }),
   // I: fallback księgowania po powrocie z Checkout (idempotentny, jak webhook)
-  confirm: (sessionId) => request(\`/api/stripe/confirm?session_id=\${encodeURIComponent(sessionId)}\`),
+  confirm: (sessionId) => request(`/api/stripe/confirm?session_id=${encodeURIComponent(sessionId)}`),
 };
 
 // Konta zwierząt (moduł E) — dedykowane API z weryfikacją właściciela/opiekuna.
 export const petsApi = {
   mine: () => request("/api/pets/mine"),
-  get: (id) => request(\`/api/pets/\${encodeURIComponent(id)}\`),
-  update: (id, body) => request(\`/api/pets/\${encodeURIComponent(id)}\`, { method: "PATCH", body }),
-  health: (id) => request(\`/api/pets/\${encodeURIComponent(id)}/health\`),
-  addHealth: (id, body) => request(\`/api/pets/\${encodeURIComponent(id)}/health\`, { method: "POST", body }),
-  removeHealth: (id, recordId) => request(\`/api/pets/\${encodeURIComponent(id)}/health/\${encodeURIComponent(recordId)}\`, { method: "DELETE" }),
-  calendar: (id) => request(\`/api/pets/\${encodeURIComponent(id)}/calendar\`),
-  addEvent: (id, body) => request(\`/api/pets/\${encodeURIComponent(id)}/calendar\`, { method: "POST", body }),
-  toggleEvent: (id, eventId, done) => request(\`/api/pets/\${encodeURIComponent(id)}/calendar/\${encodeURIComponent(eventId)}\`, { method: "PATCH", body: { done } }),
-  removeEvent: (id, eventId) => request(\`/api/pets/\${encodeURIComponent(id)}/calendar/\${encodeURIComponent(eventId)}\`, { method: "DELETE" }),
-  measurements: (id) => request(\`/api/pets/\${encodeURIComponent(id)}/measurements\`),
-  addMeasurement: (id, body) => request(\`/api/pets/\${encodeURIComponent(id)}/measurements\`, { method: "POST", body }),
-  removeMeasurement: (id, mid) => request(\`/api/pets/\${encodeURIComponent(id)}/measurements/\${encodeURIComponent(mid)}\`, { method: "DELETE" }),
-  achievements: (id) => request(\`/api/pets/\${encodeURIComponent(id)}/achievements\`),
-  addAchievement: (id, body) => request(\`/api/pets/\${encodeURIComponent(id)}/achievements\`, { method: "POST", body }),
-  removeAchievement: (id, aid) => request(\`/api/pets/\${encodeURIComponent(id)}/achievements/\${encodeURIComponent(aid)}\`, { method: "DELETE" }),
-  caregivers: (id) => request(\`/api/pets/\${encodeURIComponent(id)}/caregivers\`),
-  addCaregiver: (id, body) => request(\`/api/pets/\${encodeURIComponent(id)}/caregivers\`, { method: "POST", body }),
-  removeCaregiver: (id, userId) => request(\`/api/pets/\${encodeURIComponent(id)}/caregivers/\${encodeURIComponent(userId)}\`, { method: "DELETE" }),
+  get: (id) => request(`/api/pets/${encodeURIComponent(id)}`),
+  update: (id, body) => request(`/api/pets/${encodeURIComponent(id)}`, { method: "PATCH", body }),
+  health: (id) => request(`/api/pets/${encodeURIComponent(id)}/health`),
+  addHealth: (id, body) => request(`/api/pets/${encodeURIComponent(id)}/health`, { method: "POST", body }),
+  removeHealth: (id, recordId) => request(`/api/pets/${encodeURIComponent(id)}/health/${encodeURIComponent(recordId)}`, { method: "DELETE" }),
+  calendar: (id) => request(`/api/pets/${encodeURIComponent(id)}/calendar`),
+  addEvent: (id, body) => request(`/api/pets/${encodeURIComponent(id)}/calendar`, { method: "POST", body }),
+  toggleEvent: (id, eventId, done) => request(`/api/pets/${encodeURIComponent(id)}/calendar/${encodeURIComponent(eventId)}`, { method: "PATCH", body: { done } }),
+  removeEvent: (id, eventId) => request(`/api/pets/${encodeURIComponent(id)}/calendar/${encodeURIComponent(eventId)}`, { method: "DELETE" }),
+  measurements: (id) => request(`/api/pets/${encodeURIComponent(id)}/measurements`),
+  addMeasurement: (id, body) => request(`/api/pets/${encodeURIComponent(id)}/measurements`, { method: "POST", body }),
+  removeMeasurement: (id, mid) => request(`/api/pets/${encodeURIComponent(id)}/measurements/${encodeURIComponent(mid)}`, { method: "DELETE" }),
+  achievements: (id) => request(`/api/pets/${encodeURIComponent(id)}/achievements`),
+  addAchievement: (id, body) => request(`/api/pets/${encodeURIComponent(id)}/achievements`, { method: "POST", body }),
+  removeAchievement: (id, aid) => request(`/api/pets/${encodeURIComponent(id)}/achievements/${encodeURIComponent(aid)}`, { method: "DELETE" }),
+  caregivers: (id) => request(`/api/pets/${encodeURIComponent(id)}/caregivers`),
+  addCaregiver: (id, body) => request(`/api/pets/${encodeURIComponent(id)}/caregivers`, { method: "POST", body }),
+  removeCaregiver: (id, userId) => request(`/api/pets/${encodeURIComponent(id)}/caregivers/${encodeURIComponent(userId)}`, { method: "DELETE" }),
   upcomingReminders: () => request("/api/pets/reminders/upcoming"),
 };
 
@@ -372,17 +380,17 @@ export const petsApi = {
 
 export const e2eApi = {
   register: (body) => request("/api/e2e/keys", { method: "POST", body }),
-  keys: (userId) => request(\`/api/e2e/keys/\${encodeURIComponent(userId)}\`),
+  keys: (userId) => request(`/api/e2e/keys/${encodeURIComponent(userId)}`),
   status: () => request("/api/e2e/status"),
 };
 
 export const storiesApi = {
   list: () => request("/api/stories"),
   create: (body) => request("/api/stories", { method: "POST", body }),
-  view: (id) => request(\`/api/stories/\${id}/view\`, { method: "POST", body: {} }),
-  react: (id, emoji) => request(\`/api/stories/\${id}/react\`, { method: "POST", body: { emoji } }),
+  view: (id) => request(`/api/stories/${id}/view`, { method: "POST", body: {} }),
+  react: (id, emoji) => request(`/api/stories/${id}/react`, { method: "POST", body: { emoji } }),
   mine: () => request("/api/stories/mine"),
-  remove: (id) => request(\`/api/stories/\${id}\`, { method: "DELETE" }),
+  remove: (id) => request(`/api/stories/${id}`, { method: "DELETE" }),
 };
 
 export const profileApi = {
@@ -414,8 +422,8 @@ export const privacyApi = {
 
 // Rozszerzenia messagesApi: wskaźnik „pisze…”
 export const typingApi = {
-  signal: (conversationId) => request(\`/api/messages/typing/\${conversationId}\`, { method: "POST", body: {} }),
-  get: (conversationId) => request(\`/api/messages/typing/\${conversationId}\`),
+  signal: (conversationId) => request(`/api/messages/typing/${conversationId}`, { method: "POST", body: {} }),
+  get: (conversationId) => request(`/api/messages/typing/${conversationId}`),
 };
 
 // URL gniazda realtime (Socket.IO) — używane przez ChatWindow.
@@ -424,10 +432,10 @@ export const socketUrl = API_URL || (typeof window !== "undefined" ? window.loca
 // Otwiera plik wymagający autoryzacji (np. prywatny dokument weryfikacji) w nowej karcie.
 export async function openAuthorizedFile(url) {
   if (typeof window === "undefined") return;
-  const target = /^https?:\/\//.test(url) ? url : \`\${API_URL}\${url}\`;
+  const target = /^https?:\/\//.test(url) ? url : `${API_URL}${url}`;
   const headers = {};
   const current = token();
-  if (current) headers.Authorization = \`Bearer \${current}\`;
+  if (current) headers.Authorization = `Bearer ${current}`;
   const response = await fetch(target, { headers, credentials: "omit" });
   if (!response.ok) throw new ApiError(response.status, null);
   const blob = await response.blob();

@@ -284,49 +284,100 @@ function followerPrivacyGuard(profile, req) {
   }
 }
 
-async function followList(req, { by, searchIn }) {
+async function followList(req, res, { by }) {
   const profile = await loadProfileByUserOrId(req.params.id);
   if (!profile) throw notFound("Nie znaleziono profilu");
+
   followerPrivacyGuard(profile, req);
-  const limit = Math.max(1, Math.min(50, Number(req.query.limit ?? 20)));
-  const offset = Math.max(0, Number(req.query.offset ?? 0));
-  const q = (typeof req.query.q === "string" ? req.query.q : "").trim().toLowerCase();
+
+  const parsedLimit = Number.parseInt(req.query.limit ?? "20", 10);
+  const parsedOffset = Number.parseInt(req.query.offset ?? "0", 10);
+  const limit = Number.isFinite(parsedLimit)
+    ? Math.max(1, Math.min(50, parsedLimit))
+    : 20;
+  const offset = Number.isFinite(parsedOffset)
+    ? Math.max(0, parsedOffset)
+    : 0;
+  const q = (typeof req.query.q === "string" ? req.query.q : "")
+    .trim()
+    .toLocaleLowerCase("pl");
+
   const where = by === "followers"
     ? { following_id: profile.user_id }
     : { follower_id: profile.user_id };
+
   const rows = await prisma.follow.findMany({
     where,
     orderBy: { created_date: "desc" },
-    take: 200,
+    select: {
+      follower_id: true,
+      following_id: true,
+      created_date: true,
+    },
   });
-  const ids = rows.map((r) => (by === "followers" ? r.follower_id : r.following_id)).filter(Boolean);
-  const profiles = ids.length
-    ? await prisma.profile.findMany({ where: { user_id: { in: ids } } })
+
+  const ids = rows
+    .map((row) => by === "followers" ? row.follower_id : row.following_id)
+    .filter((id) => typeof id === "string" && id.length > 0);
+
+  const uniqueIds = [...new Set(ids)];
+
+  const profiles = uniqueIds.length
+    ? await prisma.profile.findMany({
+        where: { user_id: { in: uniqueIds } },
+        select: {
+          user_id: true,
+          display_name: true,
+          handle: true,
+          avatar_url: true,
+          verified: true,
+        },
+      })
     : [];
-  const byUser = new Map(profiles.map((p) => [p.user_id, p]));
+
+  const byUser = new Map(profiles.map((item) => [item.user_id, item]));
+
   let items = ids.map((userId) => {
-    const p = byUser.get(userId);
+    const item = byUser.get(userId);
     return {
       user_id: userId,
-      display_name: p?.display_name ?? null,
-      handle: p?.handle ?? null,
-      avatar_url: p?.avatar_url ?? null,
-      verified: !!p?.verified,
+      display_name: item?.display_name ?? null,
+      handle: item?.handle ?? null,
+      avatar_url: item?.avatar_url ?? null,
+      verified: !!item?.verified,
     };
   });
+
   if (q) {
     items = items.filter((item) =>
-      (item.display_name ?? "").toLowerCase().includes(q) || (item.handle ?? "").toLowerCase().includes(q)
+      (item.display_name ?? "").toLocaleLowerCase("pl").includes(q) ||
+      (item.handle ?? "").toLocaleLowerCase("pl").includes(q)
     );
   }
+
+  const total = items.length;
   const page = items.slice(offset, offset + limit);
-  return res.json({ items: page, total: items.length, has_more: offset + limit < items.length });
+
+  return res.json({
+    items: page,
+    total,
+    limit,
+    offset,
+    has_more: offset + limit < total,
+  });
 }
 
 // GET /api/profile/:id/followers?q=&limit=&offset=
-profileRouter.get("/:id/followers", asyncHandler((req, res) => followList(req, { by: "followers" })));
+profileRouter.get(
+  "/:id/followers",
+  asyncHandler((req, res) => followList(req, res, { by: "followers" }))
+);
+
 // GET /api/profile/:id/following?q=&limit=&offset=
-profileRouter.get("/:id/following", asyncHandler((req, res) => followList(req, { by: "following" })));
+profileRouter.get(
+  "/:id/following",
+  asyncHandler((req, res) => followList(req, res, { by: "following" }))
+);
 
 // POST /api/profile/:id/follow — obserwuj (zabezpieczenia serwerowe).
 profileRouter.post(

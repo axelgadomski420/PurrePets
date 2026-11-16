@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { createFileRoute, useNavigate, useParams } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { base44 } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
 import { useI18n } from "@/lib/i18n";
@@ -49,7 +50,17 @@ function ThreadPage() {
           <ArrowLeft className="h-4 w-4" />
         </button>
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold">{otherName}</p>
+          {otherId ? (
+            <Link
+              to="/profile/$id"
+              params={{ id: String(otherId) }}
+              className="block truncate text-sm font-semibold hover:underline"
+            >
+              {otherName}
+            </Link>
+          ) : (
+            <p className="truncate text-sm font-semibold">{otherName}</p>
+          )}
           {conversation?.listing_title && (
             <p className="truncate text-[10px] text-aura">#{conversation.listing_title}</p>
           )}

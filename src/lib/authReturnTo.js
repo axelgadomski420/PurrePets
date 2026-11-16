@@ -49,7 +49,7 @@ export function currentUrl() {
   return window.location.origin + currentPath();
 }
 
-// \`search\` for a <Link> to an auth page that should come back to \`returnTo\`.
+// `search` for a <Link> to an auth page that should come back to `returnTo`.
 export function returnToSearch(returnTo) {
   return returnTo && returnTo !== "/" ? { returnTo } : {};
 }

@@ -1,5 +1,7 @@
 
 import { Router } from "express";
+import fs from "node:fs";
+import path from "node:path";
 import { prisma } from "../prisma.js";
 import { requireAuth, isAdmin, isModerator } from "../lib/auth.js";
 import { asyncHandler, badRequest, forbidden, notFound } from "../lib/errors.js";
@@ -7,6 +9,8 @@ import { ollamaHealth } from "../lib/ollama.js";
 import { notify } from "./notifications.routes.js";
 import { isPremium } from "./premium.routes.js";
 import { config } from "../config.js";
+import { uploadRoot, privateRoot } from "./uploads.routes.js";
+import { listModerationQueue, publishQuarantinedImage, rejectQuarantinedImage } from "../lib/expurr-moderation.js";
 import { getPrivateVerificationDocument } from "../lib/private-verification-documents.js";
 
 export const adminRouter = Router();
@@ -160,7 +164,7 @@ adminRouter.patch(
       await notify(target.id, { type: "moderation", title: "Konto odblokowane", body: "Blokada Twojego konta została zdjęta." });
     }
     if (data.role) {
-      await notify(target.id, { type: "system", title: "Zmiana roli", body: \`Twoja nowa rola: \${data.role}.\` });
+      await notify(target.id, { type: "system", title: "Zmiana roli", body: `Twoja nowa rola: ${data.role}.` });
     }
 
     res.json({ user: { ...updated, password_hash: undefined }, wallet });
@@ -194,7 +198,7 @@ adminRouter.get(
 
     res.setHeader("Content-Type", document.metadata.mimeType);
     res.setHeader("Content-Disposition",
-      \`inline; filename*=UTF-8''\${encodeURIComponent(document.metadata.filename || "dokument")}\`
+      `inline; filename*=UTF-8''${encodeURIComponent(document.metadata.filename || "dokument")}`
     );
     res.setHeader("Cache-Control", "private, no-store, max-age=0");
     res.setHeader("X-Content-Type-Options", "nosniff");
@@ -250,6 +254,174 @@ adminRouter.post(
     if (status !== "published" && status !== "hidden" && status !== "review") throw badRequest("status: published | hidden | review");
     const post = await prisma.post.update({ where: { id: req.params.id }, data: { status } });
     res.json(post);
+  })
+);
+
+
+// Moderacja multimediów Expurr — dostęp wyłącznie dla moderatorów/adminów.
+// Pliki pozostają w prywatnej kwarantannie aż do jawnej decyzji.
+function expurrModerationDirectory() {
+  return path.join(privateRoot, "moderation");
+}
+
+function validModerationId(id) {
+  return typeof id === "string" &&
+    /^[a-f0-9-]{36}$/i.test(id);
+}
+
+async function findExpurrModerationRecord(directory, id) {
+  if (!validModerationId(id)) throw notFound("Nie znaleziono materiału.");
+
+  const manifest = path.join(directory, `${id}.json`);
+
+  let record;
+  try {
+    record = JSON.parse(await fs.promises.readFile(manifest, "utf8"));
+  } catch {
+    throw notFound("Materiał nie istnieje w kolejce.");
+  }
+
+  if (record.id !== id || typeof record.file_name !== "string") {
+    throw notFound("Nieprawidłowy wpis kolejki.");
+  }
+
+  const safeName = path.basename(record.file_name);
+  if (safeName !== record.file_name || safeName.includes("..")) {
+    throw notFound("Nieprawidłowa nazwa pliku.");
+  }
+
+  return record;
+}
+
+// GET /api/admin/media-moderation — lista oczekujących materiałów.
+adminRouter.get(
+  "/media-moderation",
+  asyncHandler(async (_req, res) => {
+    const directory = expurrModerationDirectory();
+    const records = await listModerationQueue(directory, { limit: 150 });
+
+    res.json({
+      items: records.map((record) => ({
+        id: record.id,
+        owner_id: record.owner_id ?? null,
+        original_name: record.original_name ?? null,
+        mime_type: record.mime_type,
+        size: record.size,
+        status: record.status,
+        decision: record.decision,
+        analysis: record.analysis ?? null,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+        preview_url: `/api/admin/media-moderation/${record.id}/file`,
+      })),
+    });
+  })
+);
+
+// GET /api/admin/media-moderation/:id/file — prywatny podgląd.
+adminRouter.get(
+  "/media-moderation/:id/file",
+  asyncHandler(async (req, res) => {
+    const directory = expurrModerationDirectory();
+    const record = await findExpurrModerationRecord(directory, req.params.id);
+
+    if (!["pending", "review", "block"].includes(record.status)) {
+      throw notFound("Materiał nie jest już dostępny w kolejce.");
+    }
+
+    const file = path.resolve(directory, record.file_name);
+    if (!file.startsWith(path.resolve(directory) + path.sep)) {
+      throw notFound("Nie znaleziono pliku.");
+    }
+
+    let stat;
+    try {
+      stat = await fs.promises.stat(file);
+    } catch {
+      throw notFound("Plik nie istnieje.");
+    }
+
+    if (!stat.isFile()) throw notFound("Nie znaleziono pliku.");
+
+    const allowedMime = new Set([
+      "image/jpeg", "image/png", "image/webp",
+      "image/gif", "image/avif",
+    ]);
+
+    if (!allowedMime.has(record.mime_type)) {
+      throw badRequest("Podgląd tego typu pliku nie jest obsługiwany.");
+    }
+
+    res.setHeader("Content-Type", record.mime_type);
+    res.setHeader("Content-Length", String(stat.size));
+    res.setHeader("Content-Disposition", "inline");
+    res.setHeader("Cache-Control", "private, no-store");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+
+    const stream = fs.createReadStream(file);
+    stream.on("error", () => {
+      if (!res.headersSent) res.status(500).end();
+      else res.destroy();
+    });
+    stream.pipe(res);
+  })
+);
+
+// POST /api/admin/media-moderation/:id — approve albo reject.
+adminRouter.post(
+  "/media-moderation/:id",
+  asyncHandler(async (req, res) => {
+    const action = req.body?.action;
+    const directory = expurrModerationDirectory();
+    const record = await findExpurrModerationRecord(directory, req.params.id);
+
+    if (action === "approve") {
+      // Nie zatwierdzamy wpisu, którego analiza jeszcze trwa.
+      if (record.status !== "review") {
+        throw badRequest("Materiał nie oczekuje na ręczną decyzję.");
+      }
+
+      const publicDirectory = uploadRoot;
+      fs.mkdirSync(publicDirectory, { recursive: true });
+
+      const published = await publishQuarantinedImage({
+        id: record.id,
+        quarantineDirectory: directory,
+        publicDirectory,
+        moderatorApproved: true,
+      });
+
+      const base = config.publicBaseUrl.replace(/\/$/, "");
+      const url = `${base}/api/uploads/file/${published.file_name}`;
+
+      return res.json({
+        ok: true,
+        status: "published",
+        file_url: url,
+        url,
+      });
+    }
+
+    if (action === "reject") {
+      if (!["pending", "review", "block"].includes(record.status)) {
+        throw badRequest("Materiał nie może zostać odrzucony w tym stanie.");
+      }
+
+      const reason = typeof req.body?.reason === "string"
+        ? req.body.reason.slice(0, 1000)
+        : "Odrzucono przez moderatora.";
+
+      await rejectQuarantinedImage({
+        id: record.id,
+        quarantineDirectory: directory,
+        moderatorId: String(req.user.id),
+        reason,
+      });
+
+      return res.json({ ok: true, status: "rejected" });
+    }
+
+    throw badRequest('Dozwolone akcje: "approve" albo "reject".');
   })
 );
 

@@ -36,5 +36,5 @@ export function distanceLabel(fromCity, to) {
   if (!from || !to?.lat || !to?.lng) return null;
   const km = haversineKm(from, { lat: to.lat, lng: to.lng });
   if (km === null) return null;
-  return km < 10 ? \`\${km.toFixed(1)} km\` : \`\${Math.round(km)} km\`;
+  return km < 10 ? `${km.toFixed(1)} km` : `${Math.round(km)} km`;
 }

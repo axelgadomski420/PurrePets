@@ -1,18 +1,12 @@
 import { Dog, Lock, Mail, UserPlus, Heart } from "lucide-react";
 import { useState } from "react";
-import { toast } from "sonner";
 import { base44 } from "@/api/base44Client";
 import { AuthLayout } from "@/components/auth/AuthLayout";
-import { MfaFlow } from "@/components/auth/MfaFlow";
-import { MfaScreen } from "@/components/auth/MfaParts";
 import { AuthError, AuthLink, GoogleButton, OrDivider, SubmitButton } from "@/components/auth/parts";
 import { Input } from "@/components/ui/input";
-import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
 import { Label } from "@/components/ui/label";
 import { safeReturnTo } from "@/lib/authReturnTo";
 import { cn } from "@/lib/utils";
-
-const isAlreadyVerified = (err) => err?.status === 400 && /already verified/i.test(err?.message ?? "");
 
 const ACCOUNT_TYPES = [
   { id: "breeder", label: "Hodowca", hint: "dodaję ogłoszenia", icon: Dog },
@@ -29,11 +23,8 @@ export function RegisterPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [otpCode, setOtpCode] = useState("");
-  const [step, setStep] = useState("form");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const [mfaChallenge, setMfaChallenge] = useState(null);
 
   function finish(token) {
     if (token) base44.auth.setToken(token);
@@ -52,91 +43,13 @@ export function RegisterPage() {
     setBusy(true);
     try {
       const result = await base44.auth.register(email, password);
-      if (result?.access_token) {
-        finish(result.access_token);
-        return;
-      }
-      setStep("otp");
+      if (!result?.access_token) throw new Error("Backend nie zwrócił tokenu sesji");
+      finish(result.access_token);
     } catch (err) {
       setError(err.message || "Rejestracja nie powiodła się");
     } finally {
       setBusy(false);
     }
-  }
-
-  async function verify(e) {
-    e.preventDefault();
-    setError("");
-    setBusy(true);
-    try {
-      const result = await base44.auth.verifyOtp(email, otpCode);
-      if (result?.mfa_required) {
-        setMfaChallenge(result);
-        return;
-      }
-      finish(result?.access_token);
-    } catch (err) {
-      if (isAlreadyVerified(err)) setStep("already_verified");
-      else setError(err.message || "Nieprawidłowy kod weryfikacyjny");
-      setBusy(false);
-    }
-  }
-
-  async function resend() {
-    setError("");
-    try {
-      await base44.auth.resendOtp(email);
-      toast("Kod wysłany", { description: "Sprawdź skrzynkę — przyszedł nowy kod." });
-    } catch (err) {
-      if (isAlreadyVerified(err)) setStep("already_verified");
-      else setError(err.message || "Nie udało się wysłać kodu ponownie");
-    }
-  }
-
-  if (mfaChallenge) return <MfaScreen><MfaFlow challenge={mfaChallenge} returnTo={returnTo} /></MfaScreen>;
-
-  if (step === "already_verified") {
-    return (
-      <AuthLayout icon={UserPlus} title="Załóż konto" subtitle="Dołącz do PURRE PETS">
-        <p className="mb-4 text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">{email}</span> jest już zweryfikowany. Zaloguj się, aby kontynuować.
-        </p>
-        <AuthLink to="/login" returnTo={returnTo} className="inline-flex h-12 w-full items-center justify-center rounded-md bg-primary text-sm font-medium text-primary-foreground hover:bg-primary/90">
-          Zaloguj się
-        </AuthLink>
-      </AuthLayout>
-    );
-  }
-
-  if (step === "otp") {
-    return (
-      <AuthLayout icon={UserPlus} title="Załóż konto" subtitle="Dołącz do PURRE PETS">
-        <form onSubmit={verify}>
-          <p className="mb-4 text-sm text-muted-foreground">
-            Wysłaliśmy 6-cyfrowy kod na <span className="font-medium text-foreground">{email}</span>.
-          </p>
-          <AuthError>{error}</AuthError>
-          <div className="mb-6 flex justify-center">
-            <InputOTP maxLength={6} value={otpCode} onChange={setOtpCode} autoFocus autoComplete="one-time-code">
-              <InputOTPGroup>
-                {[0, 1, 2, 3, 4, 5].map((i) => (
-                  <InputOTPSlot key={i} index={i} />
-                ))}
-              </InputOTPGroup>
-            </InputOTP>
-          </div>
-          <SubmitButton busy={busy} busyLabel="Weryfikuję..." disabled={busy || otpCode.length < 6}>
-            Zweryfikuj
-          </SubmitButton>
-          <p className="mt-4 text-center text-sm text-muted-foreground">
-            Nie dostałeś kodu?{" "}
-            <button type="button" onClick={resend} className="font-medium text-primary hover:underline">
-              Wyślij ponownie
-            </button>
-          </p>
-        </form>
-      </AuthLayout>
-    );
   }
 
   return (

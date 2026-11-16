@@ -1,7 +1,7 @@
 import { createMiddleware } from "@tanstack/react-start";
 import { getRequest, setResponseStatus } from "@tanstack/react-start/server";
 
-// Standalone: brak platformy Base44 — middleware są przepustowe, a \`context.getBase44()\`
+// Standalone: brak platformy Base44 — middleware są przepustowe, a `context.getBase44()`
 // zwraca null (żaden handler już nie korzysta z klienta platformy).
 const withGetBase44 = (next) => next({ context: { getBase44: () => null } });
 
@@ -13,7 +13,7 @@ export const authMiddleware = createMiddleware({ type: "function" })
     try {
       token = typeof window === "undefined" ? null : (localStorage.getItem("purre_access_token") ?? localStorage.getItem("purre:token"));
     } catch { /* localStorage może być niedostępny. */ }
-    return next({ headers: token ? { Authorization: \`Bearer \${token}\` } : {} });
+    return next({ headers: token ? { Authorization: `Bearer ${token}` } : {} });
   })
   .server(({ next }) => withGetBase44(next));
 

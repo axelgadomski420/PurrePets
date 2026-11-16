@@ -293,3 +293,137 @@
     transform: translateY(0);
   }
 }
+
+
+/* PURRE STUDIO — dopracowanie interfejsu edytora */
+.purre-studio {
+  color-scheme: dark;
+  isolation: isolate;
+}
+
+.purre-studio button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+.purre-studio button:not(:disabled) {
+  transition:
+    background-color 180ms ease,
+    border-color 180ms ease,
+    color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.purre-studio button:not(:disabled):active {
+  transform: scale(.975);
+}
+
+.purre-studio button:focus-visible,
+.purre-studio input:focus-visible,
+.purre-studio select:focus-visible {
+  outline: 2px solid rgb(217 70 239 / 75%);
+  outline-offset: 3px;
+}
+
+.purre-studio input[type="range"] {
+  display: block;
+  height: 6px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #8b5cf6, #d946ef);
+  cursor: pointer;
+  accent-color: #d946ef;
+  touch-action: pan-y;
+}
+
+.purre-studio input[type="range"]::-webkit-slider-thumb {
+  width: 17px;
+  height: 17px;
+  appearance: none;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: #d946ef;
+  box-shadow: 0 0 0 4px rgb(217 70 239 / 16%), 0 2px 9px #0009;
+}
+
+.purre-studio input[type="range"]::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 3px solid #fff;
+  border-radius: 50%;
+  background: #d946ef;
+  box-shadow: 0 0 0 4px rgb(217 70 239 / 16%), 0 2px 9px #0009;
+}
+
+.purre-studio input[type="color"] {
+  min-width: 40px;
+  min-height: 32px;
+  padding: 3px;
+  overflow: hidden;
+  border: 1px solid rgb(255 255 255 / 15%);
+  border-radius: 10px;
+  background: #17141f;
+  cursor: pointer;
+}
+
+.purre-studio input[type="checkbox"] {
+  accent-color: #d946ef;
+}
+
+.purre-studio input[type="file"] {
+  max-width: 100%;
+  color: rgb(255 255 255 / 65%);
+  font-size: 11px;
+}
+
+.purre-studio input[type="file"]::file-selector-button {
+  margin-right: 10px;
+  padding: 8px 12px;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 10px;
+  background: rgb(255 255 255 / 7%);
+  color: white;
+  cursor: pointer;
+}
+
+.purre-studio audio {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 12px;
+  color-scheme: dark;
+}
+
+.purre-studio select {
+  max-width: 100%;
+  border: 1px solid rgb(255 255 255 / 12%);
+  border-radius: 11px;
+  background-color: #191621;
+  color: white;
+}
+
+.purre-studio ::selection {
+  background: rgb(217 70 239 / 35%);
+  color: white;
+}
+
+@media (max-width: 640px) {
+  .purre-studio input[type="range"]::-webkit-slider-thumb {
+    width: 20px;
+    height: 20px;
+  }
+
+  .purre-studio input[type="range"]::-moz-range-thumb {
+    width: 15px;
+    height: 15px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .purre-studio *,
+  .purre-studio *::before,
+  .purre-studio *::after {
+    scroll-behavior: auto !important;
+    transition-duration: .01ms !important;
+    animation-duration: .01ms !important;
+  }
+}

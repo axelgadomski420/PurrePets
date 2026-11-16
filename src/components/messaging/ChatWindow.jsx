@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, CheckCheck, File as FileIcon, Image as ImageIcon, Loader2, Lock, MoreVertical, Paperclip, Phone, Search, Send, Smile, Trash2, Video } from "lucide-react";
+import { Check, CheckCheck, File as FileIcon, Image as ImageIcon, Loader2, Lock, MoreVertical, Paperclip, Phone, Search, Send, Smile, Trash2, Video, Mic, Square } from "lucide-react";
 import { toast } from "sonner";
+import { Link } from "@tanstack/react-router";
 import { io } from "socket.io-client";
 import { base44, messagesApi } from "@/api/base44Client";
 import { decryptFrom, encryptFor, ensureE2eKeys } from "@/lib/e2e";
@@ -37,12 +38,15 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
   const [e2eReady, setE2eReady] = useState(false);
   const [search, setSearch] = useState("");
   const [menuFor, setMenuFor] = useState(null);
-  const [callRequest, setCallRequest] = useState(null); // H: { kind, seq }
+  const [callRequest, setCallRequest] = useState(null);
+  const [recording, setRecording] = useState(false); // H: { kind, seq }
   const [socketInstance, setSocketInstance] = useState(null);
   const endRef = useRef(null);
   const topRef = useRef(null);
   const fileRef = useRef(null);
   const docRef = useRef(null);
+  const recorderRef = useRef(null);
+  const recordingStreamRef = useRef(null);
   const listRef = useRef(null);
   const socketRef = useRef(null);
   const lastTypingSent = useRef(0);
@@ -144,6 +148,18 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
+  useEffect(() => {
+    return () => {
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== "inactive") {
+        recorder.onstop = null;
+        recorder.stop();
+      }
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+      recordingStreamRef.current = null;
+    };
+  }, []);
+
   const signalTyping = () => {
     if (!conversationId) return;
     const now = Date.now();
@@ -204,6 +220,89 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
     }
   };
 
+  const startVoiceRecording = async () => {
+    if (busy || recording) return;
+
+    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+      toast.error("Ta przeglądarka nie obsługuje nagrywania głosu.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      recordingStreamRef.current = stream;
+
+      const formats = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/mp4",
+      ];
+      const mimeType = formats.find((type) => MediaRecorder.isTypeSupported(type));
+
+      const recorder = new MediaRecorder(
+        stream,
+        mimeType ? { mimeType } : undefined
+      );
+      const chunks = [];
+
+      recorder.ondataavailable = (event) => {
+        if (event.data?.size) chunks.push(event.data);
+      };
+
+      recorder.onerror = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+        recorderRef.current = null;
+        setRecording(false);
+        toast.error("Błąd podczas nagrywania głosu.");
+      };
+
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        recordingStreamRef.current = null;
+        recorderRef.current = null;
+        setRecording(false);
+
+        if (!chunks.length) {
+          toast.error("Nagranie jest puste.");
+          return;
+        }
+
+        const type = recorder.mimeType || "audio/webm";
+        const extension = type.includes("mp4") ? "m4a" : "webm";
+        const blob = new Blob(chunks, { type });
+        const file = new File(
+          [blob],
+          `purre-voice-${Date.now()}.${extension}`,
+          { type }
+        );
+
+        sendMedia(file);
+      };
+
+      recorderRef.current = recorder;
+      recorder.start(250);
+      setRecording(true);
+      toast.success("Nagrywanie rozpoczęte. Naciśnij przycisk ponownie, aby wysłać.");
+    } catch (err) {
+      recordingStreamRef.current?.getTracks().forEach((track) => track.stop());
+      recordingStreamRef.current = null;
+      recorderRef.current = null;
+      setRecording(false);
+
+      toast.error(
+        err?.name === "NotAllowedError"
+          ? "Zezwól aplikacji na dostęp do mikrofonu."
+          : err?.message || "Nie udało się uruchomić mikrofonu."
+      );
+    }
+  };
+
+  const stopVoiceRecording = () => {
+    const recorder = recorderRef.current;
+    if (recorder && recorder.state !== "inactive") recorder.stop();
+  };
+
   const react = async (m, emoji) => {
     setMenuFor(null);
     try {
@@ -226,11 +325,46 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
   const startCall = (kind) => setCallRequest((prev) => ({ kind, seq: (prev?.seq ?? 0) + 1 }));
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
       <div className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
-        <img src={peer?.avatar_url} alt="" className="h-9 w-9 rounded-full object-cover" />
+        {peerId ? (
+          <Link
+            to="/profile/$id"
+            params={{ id: String(peerId) }}
+            className="shrink-0"
+            aria-label="Otwórz profil rozmówcy"
+          >
+            {peer?.avatar_url ? (
+              <img
+                src={peer.avatar_url}
+                alt=""
+                className="h-9 w-9 rounded-full object-cover"
+              />
+            ) : (
+              <span className="grid h-9 w-9 place-items-center rounded-full bg-secondary text-xs font-semibold">
+                {(peer?.display_name || peer?.name || "?").slice(0, 2).toUpperCase()}
+              </span>
+            )}
+          </Link>
+        ) : (
+          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-secondary text-xs font-semibold">
+            {(peer?.display_name || peer?.name || "?").slice(0, 2).toUpperCase()}
+          </span>
+        )}
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold">{peer?.display_name || peer?.name || "Rozmowa"}</p>
+          {peerId ? (
+            <Link
+              to="/profile/$id"
+              params={{ id: String(peerId) }}
+              className="block truncate text-sm font-semibold hover:underline"
+            >
+              {peer?.display_name || peer?.name || "Rozmowa"}
+            </Link>
+          ) : (
+            <p className="truncate text-sm font-semibold">
+              {peer?.display_name || peer?.name || "Rozmowa"}
+            </p>
+          )}
           <p className="flex items-center gap-1 text-[10px] text-muted-foreground">
             <Lock className="h-3 w-3" /> Szyfrowanie end-to-end
             {typing.length > 0 && <span className="ml-1 text-aura">· {typing[0].name ?? "ktoś"} pisze…</span>}
@@ -271,7 +405,7 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
         )}
       </div>
 
-      <div ref={listRef} className="flex-1 space-y-2 overflow-y-auto px-3 py-3">
+      <div ref={listRef} className="min-h-0 min-w-0 flex-1 space-y-2 overflow-x-hidden overflow-y-auto px-2 sm:px-3 py-3">
         <div ref={topRef} className="flex justify-center py-1">
           {hasMore && (
             <button type="button" onClick={loadOlder} className="flex items-center gap-1 rounded-full border border-border/60 px-3 py-1 text-[10px] text-muted-foreground">
@@ -291,7 +425,7 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
               >
                 <Smile className="h-4 w-4" />
               </button>
-              <div className={cn("max-w-[75%] rounded-2xl px-3 py-2 text-sm", mine ? "bg-aura/25 text-foreground" : "bg-secondary/60 text-foreground")}>
+              <div className={cn("min-w-0 max-w-[85%] sm:max-w-[75%] break-words [overflow-wrap:anywhere] rounded-2xl px-3 py-2 text-sm", mine ? "bg-aura/25 text-foreground" : "bg-secondary/60 text-foreground")}>
                 {m.media_url && (
                   m.media_type === "video" ? (
                     <video src={m.media_url} controls className="mb-1 max-h-56 rounded-xl" />
@@ -346,7 +480,7 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
         <div ref={endRef} />
       </div>
 
-      <div className="flex items-center gap-2 border-t border-border/60 p-2">
+      <div className="flex min-w-0 items-center gap-1.5 border-t border-border/60 p-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
         <input
           ref={fileRef}
           type="file"
@@ -380,9 +514,21 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
           }}
           onKeyDown={(e) => e.key === "Enter" && send()}
           placeholder="Napisz wiadomość…"
-          className="h-10 flex-1 rounded-xl border border-border/60 bg-background/50 px-3 text-sm outline-none"
+          className="h-10 min-w-0 flex-1 rounded-xl border border-border/60 bg-background/50 px-2 sm:px-3 text-sm outline-none"
         />
-        <button type="button" onClick={send} disabled={busy} className="grid h-10 w-10 place-items-center rounded-xl bg-aura text-black disabled:opacity-50">
+        <button
+          type="button"
+          onClick={recording ? stopVoiceRecording : startVoiceRecording}
+          disabled={busy}
+          className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border disabled:opacity-50 ${
+            recording ? "border-red-500 bg-red-500 text-white" : "border-border/60"
+          }`}
+          aria-label={recording ? "Zakończ nagrywanie i wyślij" : "Nagraj głosówkę"}
+          title={recording ? "Zakończ nagrywanie i wyślij" : "Nagraj głosówkę"}
+        >
+          {recording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+        </button>
+        <button type="button" onClick={send} disabled={busy} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-aura text-black disabled:opacity-50">
           <Send className="h-4 w-4" />
         </button>
       </div>

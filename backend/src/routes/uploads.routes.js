@@ -41,7 +41,12 @@ function writableDir() {
   return fallback;
 }
 
-const uploadRoot = writableDir();
+export const uploadRoot = writableDir();
+
+// Prywatny katalog kwarantanny — poza publicznym /uploads.
+export const privateRoot = path.join(path.dirname(uploadRoot), "purrepets-private");
+const moderationIncoming = path.join(privateRoot, "moderation-incoming");
+fs.mkdirSync(moderationIncoming, { recursive: true, mode: 0o700 });
 
 // Limity per typ (Moduł 2): zdjęcia 10 MB, wideo 100 MB (Reels), audio 20 MB.
 const IMAGE_LIMIT = 10 * 1024 * 1024;
@@ -78,11 +83,21 @@ function categoryOf(mime) {
 
 // Unikalne nazwy: timestamp + UUID v4 — zero kolizji.
 const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => cb(null, uploadRoot),
+  destination: (_req, file, cb) => {
+    if (file.mimetype.startsWith("image/") || file.mimetype.startsWith("video/")) {
+      try {
+        fs.mkdirSync(moderationIncoming, { recursive: true, mode: 0o700 });
+        return cb(null, moderationIncoming);
+      } catch (error) {
+        return cb(error);
+      }
+    }
+    cb(null, uploadRoot);
+  },
   filename: (_req, file, cb) => {
     // Rozszerzenie zawsze wynika z MIME, a nie z nazwy podanej przez klienta.
     const safeExt = MIME_EXT[file.mimetype] ?? "";
-    cb(null, \`\${Date.now()}-\${crypto.randomUUID()}\${safeExt}\`);
+    cb(null, `${Date.now()}-${crypto.randomUUID()}${safeExt}`);
   },
 });
 
@@ -90,7 +105,7 @@ const upload = multer({
   storage,
   limits: { fileSize: VIDEO_LIMIT, files: 1 },
   fileFilter: (_req, file, cb) => {
-    if (!ALLOWED.has(file.mimetype)) return cb(badRequest(\`Nieobsługiwany typ pliku: \${file.mimetype}\`));
+    if (!ALLOWED.has(file.mimetype)) return cb(badRequest(`Nieobsługiwany typ pliku: ${file.mimetype}`));
     cb(null, true);
   },
 });
@@ -234,7 +249,7 @@ uploadsRouter.get("/file/:name", (req, res) => {
   res.setHeader("Cache-Control", "public, max-age=2592000");
   res.setHeader("Content-Type", type);
   res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
-  res.setHeader("ETag", \`"\${stat.size}-\${Math.floor(stat.mtimeMs)}"\`);
+  res.setHeader("ETag", `"${stat.size}-${Math.floor(stat.mtimeMs)}"`);
 
   if (req.method === "HEAD") {
     res.setHeader("Content-Length", stat.size);
@@ -255,14 +270,14 @@ uploadsRouter.get("/file/:name", (req, res) => {
       }
       if (start <= end && start < stat.size) {
         res.status(206);
-        res.setHeader("Content-Range", \`bytes \${start}-\${end}/\${stat.size}\`);
+        res.setHeader("Content-Range", `bytes ${start}-${end}/${stat.size}`);
         res.setHeader("Content-Length", end - start + 1);
         const stream = fs.createReadStream(file, { start, end });
         stream.on("error", () => res.destroy());
         return stream.pipe(res);
       }
       res.status(416);
-      res.setHeader("Content-Range", \`bytes */\${stat.size}\`);
+      res.setHeader("Content-Range", `bytes */${stat.size}`);
       return res.end();
     }
   }
@@ -281,8 +296,6 @@ uploadsRouter.get("/file/:name", (req, res) => {
 // Katalog celowo POZA publicznym aliasem /uploads/ w Nginx (ten serwuje uploadRoot bez autoryzacji).
 // Dostęp WYŁĄCZNIE przez GET /api/uploads/private/:userId/:name z tokenem — właściciel pliku lub admin.
 
-const privateRoot = path.join(path.dirname(uploadRoot), "purrepets-private");
-
 const privateStorage = multer.diskStorage({
   destination: (req, _file, cb) => {
     const dir = path.join(privateRoot, String(req.user.id));
@@ -292,7 +305,7 @@ const privateStorage = multer.diskStorage({
   filename: (_req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase().slice(0, 10);
     const safeExt = /^\.[a-z0-9]+$/.test(ext) ? ext : (file.mimetype === "application/pdf" ? ".pdf" : (MIME_EXT[file.mimetype] ?? ""));
-    cb(null, \`\${Date.now()}-\${crypto.randomUUID()}\${safeExt}\`);
+    cb(null, `${Date.now()}-${crypto.randomUUID()}${safeExt}`);
   },
 });
 
@@ -301,7 +314,7 @@ const privateUpload = multer({
   limits: { fileSize: 20 * 1024 * 1024, files: 1 },
   fileFilter: (_req, file, cb) => {
     const ok = file.mimetype === "application/pdf" || (typeof file.mimetype === "string" && file.mimetype.startsWith("image/"));
-    if (!ok) return cb(badRequest(\`Nieobsługiwany typ dokumentu: \${file.mimetype}\`));
+    if (!ok) return cb(badRequest(`Nieobsługiwany typ dokumentu: ${file.mimetype}`));
     cb(null, true);
   },
 });
@@ -313,7 +326,7 @@ uploadsRouter.post(
   privateUpload.single("file"),
   asyncHandler(async (req, res) => {
     if (!req.file) throw badRequest('No file uploaded (expected multipart field "file")');
-    const fileUrl = \`/api/uploads/private/\${req.user.id}/\${req.file.filename}\`;
+    const fileUrl = `/api/uploads/private/${req.user.id}/${req.file.filename}`;
     res.status(201).json({ file_url: fileUrl, url: fileUrl, size: req.file.size, type: req.file.mimetype });
   })
 );
@@ -351,31 +364,123 @@ uploadsRouter.post(
   requireAuth,
   upload.single("file"),
   asyncHandler(async (req, res) => {
-    if (!req.file) throw badRequest('No file uploaded (expected multipart field "file")');
-
-    // MIME deklarowany przez klienta nie jest dowodem formatu pliku.
-    if (
-      !req.file.size ||
-      !hasValidUploadSignature(req.file.path, req.file.mimetype)
-    ) {
-      try { fs.unlinkSync(req.file.path); } catch { /* Operacja porządkowa jest best-effort. */ }
-      throw badRequest("Zawartość pliku nie odpowiada deklarowanemu formatowi");
+    if (!req.file) {
+      throw badRequest('No file uploaded (expected multipart field "file")');
     }
+
+    const cleanup = () => {
+      try {
+        if (req.file?.path && fs.existsSync(req.file.path)) {
+          fs.unlinkSync(req.file.path);
+        }
+      } catch {}
+    };
 
     const category = categoryOf(req.file.mimetype);
     const limit = LIMITS[category];
-    if (limit && req.file.size > limit) {
-      try { fs.unlinkSync(req.file.path); } catch { /* Operacja porządkowa jest best-effort. */ }
+
+    if (!category || !limit || !req.file.size || req.file.size > limit) {
+      cleanup();
       return res.status(413).json({
         error: {
-          message: \`Plik za duży (max \${Math.floor(limit / (1024 * 1024))} MB dla \${category})\`,
-          code: "FILE_TOO_LARGE",
+          message: "Nieprawidłowy rozmiar lub typ pliku.",
+          code: "INVALID_UPLOAD",
         },
       });
     }
+
+    if (!hasValidUploadSignature(req.file.path, req.file.mimetype)) {
+      cleanup();
+      throw badRequest("Zawartość pliku nie odpowiada deklarowanemu formatowi");
+    }
+
+    if (category === "video") {
+      cleanup();
+      return res.status(503).json({
+        error: {
+          message: "Film nie został opublikowany. Moderacja klatek wideo nie jest jeszcze skonfigurowana.",
+          code: "VIDEO_MODERATION_UNAVAILABLE",
+        },
+      });
+    }
+
+    if (category === "image") {
+      const moderation = await import("../lib/expurr-moderation.js");
+      const quarantineDirectory = path.join(privateRoot, "moderation");
+      let record;
+
+      try {
+        const buffer = fs.readFileSync(req.file.path);
+
+        record = await moderation.quarantineImage({
+          buffer,
+          mimeType: req.file.mimetype,
+          ownerId: String(req.user.id),
+          quarantineDirectory,
+          originalName: req.file.originalname,
+        });
+      } finally {
+        cleanup();
+      }
+
+      const analyzed = await moderation.analyzeQuarantinedImage({
+        id: record.id,
+        quarantineDirectory,
+      });
+
+      if (analyzed.decision === "block") {
+        await moderation.rejectQuarantinedImage({
+          id: record.id,
+          quarantineDirectory,
+          moderatorId: "expurr-auto",
+          reason: analyzed.analysis?.summary || "Jednoznaczne naruszenie zasad.",
+        });
+
+        return res.status(422).json({
+          error: {
+            message: "Materiał został odrzucony przez automatyczną moderację.",
+            code: "MEDIA_REJECTED",
+          },
+          moderation_id: record.id,
+        });
+      }
+
+      if (analyzed.status !== "approved_for_publication") {
+        return res.status(202).json({
+          status: "pending_review",
+          moderation_id: record.id,
+          message: "Zdjęcie oczekuje na decyzję moderatora i nie jest publiczne.",
+        });
+      }
+
+      const published = await moderation.publishQuarantinedImage({
+        id: record.id,
+        quarantineDirectory,
+        publicDirectory: uploadRoot,
+      });
+
+      const base = config.publicBaseUrl.replace(/\/$/, "");
+      const url = `${base}/api/uploads/file/${published.file_name}`;
+
+      return res.status(201).json({
+        file_url: url,
+        url,
+        size: published.size,
+        type: published.mime_type,
+        moderation: "approved",
+      });
+    }
+
+    // Audio pozostaje przy dotychczasowym mechanizmie.
     const base = config.publicBaseUrl.replace(/\/$/, "");
-    const url = \`\${base}/api/uploads/file/\${req.file.filename}\`;
-    res.status(201).json({ file_url: url, url, size: req.file.size, type: req.file.mimetype });
+    const url = `${base}/api/uploads/file/${req.file.filename}`;
+
+    return res.status(201).json({
+      file_url: url,
+      url,
+      size: req.file.size,
+      type: req.file.mimetype,
+    });
   })
 );
 

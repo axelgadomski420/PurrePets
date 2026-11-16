@@ -2,7 +2,7 @@ export const LISTING_COST = 10;
 // Replacement for the TanStack Start server functions. All heavy logic now lives in the
 // self-hosted backend; these are plain async client-side calls.
 //
-// Call sites (they used \`useServerFn(...)\`):
+// Call sites (they used `useServerFn(...)`):
 //   create.jsx:         const { listing, cost } = await createListing({ data: {...} });
 //                       const result = await moderateListing({ data: { listing_id } });
 //   rewards.jsx:        await redeemReward({ data: { reward_key, target_id } });

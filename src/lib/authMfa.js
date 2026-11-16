@@ -18,10 +18,10 @@ export async function continueMfa(_result, returnTo) {
 // Social login is not configured on the self-hosted backend.
 export async function loginWithSocial(provider, returnTo) {
   if (provider === "google") {
-    window.location.assign(\`/api/auth/google?returnTo=\${encodeURIComponent(returnTo ?? window.location.href)}\`);
+    window.location.assign(`/api/auth/google?returnTo=${encodeURIComponent(returnTo ?? window.location.href)}`);
     return;
   }
-  window.location.assign(\`/login?returnTo=\${encodeURIComponent(returnTo ?? window.location.href)}\`);
+  window.location.assign(`/login?returnTo=${encodeURIComponent(returnTo ?? window.location.href)}`);
 }
 
 export function loginWithGoogle(returnTo) {

@@ -431,19 +431,84 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
 
   const buildVideoExport = async () => {
     const clips = [];
-    for (const item of items.filter((i) => i.type === "video")) {
-      const video = document.createElement("video");
-      video.src = item.url;
-      video.playsInline = true;
-      video.preload = "auto";
-      await new Promise((resolve) => {
-        video.addEventListener("loadeddata", resolve, { once: true });
-        video.addEventListener("error", resolve, { once: true });
-        setTimeout(resolve, 4000); // wolna sieć nie może zawiesić eksportu
-      });
-      if (!video.videoWidth) throw new Error("Nie udało się wczytać klipu: " + (item.file?.name ?? ""));
-      clips.push({ video, trimStart: item.trimStart, trimEnd: item.trimEnd, speed: item.speed, filter: item.filter, brightness: item.brightness, contrast: item.contrast, saturation: item.saturation, temperature: item.temperature, vignette: item.vignette, grain: item.grain, blur: item.blur, rotation: item.rotation, flipX: item.flipX, flipY: item.flipY, zoom: item.zoom, offsetX: item.offsetX, offsetY: item.offsetY });
+
+    for (const item of items) {
+      if (item.type === "video") {
+        const video = document.createElement("video");
+        video.src = item.url;
+        video.playsInline = true;
+        video.preload = "auto";
+
+        await new Promise((resolve) => {
+          if (video.readyState >= 2) return resolve();
+          video.addEventListener("loadeddata", resolve, { once: true });
+          video.addEventListener("error", resolve, { once: true });
+          setTimeout(resolve, 8000);
+        });
+
+        if (!video.videoWidth) {
+          throw new Error("Nie udało się wczytać klipu: " + (item.file?.name ?? ""));
+        }
+
+        const start = Math.max(0, Number(item.trimStart) || 0);
+        const end = Math.min(
+          Number(item.trimEnd) > start ? Number(item.trimEnd) : video.duration,
+          video.duration || Number(item.trimEnd) || 0
+        );
+
+        if (!Number.isFinite(end) || end <= start) {
+          throw new Error("Nieprawidłowy zakres klipu: " + (item.file?.name ?? ""));
+        }
+
+        clips.push({
+          video,
+          trimStart: start,
+          trimEnd: end,
+          duration: end - start,
+          speed: item.speed,
+          ...Object.fromEntries([
+            "filter", "brightness", "contrast", "saturation", "temperature",
+            "vignette", "grain", "blur", "rotation", "flipX", "flipY",
+            "zoom", "offsetX", "offsetY"
+          ].map((key) => [key, item[key]])),
+        });
+      } else if (item.type === "image") {
+        const image = new Image();
+        image.decoding = "async";
+        image.src = item.url;
+
+        try {
+          if (image.decode) await image.decode();
+          else await new Promise((resolve, reject) => {
+            image.onload = resolve;
+            image.onerror = reject;
+          });
+        } catch {
+          throw new Error("Nie udało się wczytać zdjęcia: " + (item.file?.name ?? ""));
+        }
+
+        if (!image.naturalWidth || !image.naturalHeight) {
+          throw new Error("Zdjęcie jest niedostępne: " + (item.file?.name ?? ""));
+        }
+
+        const duration = Math.min(30, Math.max(1, Number(item.duration) || 3));
+
+        clips.push({
+          image,
+          trimStart: 0,
+          trimEnd: duration,
+          duration,
+          speed: 1,
+          ...Object.fromEntries([
+            "filter", "brightness", "contrast", "saturation", "temperature",
+            "vignette", "grain", "blur", "rotation", "flipX", "flipY",
+            "zoom", "offsetX", "offsetY"
+          ].map((key) => [key, item[key]])),
+        });
+      }
     }
+
+    if (!clips.length) throw new Error("Projekt nie zawiera materiałów do eksportu.");
     return clips;
   };
 
@@ -460,7 +525,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
     try {
       const { width, height } = exportDims();
       const canvas = document.createElement("canvas");
-      renderStudioFrame(first.video, canvas, { width, height, format: active?.format ?? defaultFormat, filter: first.filter, brightness: first.brightness, contrast: first.contrast, saturation: first.saturation, textLayers, stickers });
+      renderStudioFrame(first.video ?? first.image, canvas, { width, height, format: active?.format ?? defaultFormat, filter: first.filter, brightness: first.brightness, contrast: first.contrast, saturation: first.saturation, textLayers, stickers });
       return await new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), "image/jpeg", 0.9));
     } catch { return null; }
   };
@@ -471,7 +536,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
     setProgress(0);
     cancelRef.current = false;
     try {
-      if (isVideo) {
+      if (isVideo || audio.music?.element || audio.voice?.element) {
         const clips = await buildVideoExport();
         const { width, height } = exportDims();
         const result = await exportStudioVideo({
@@ -485,7 +550,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
         const file = new File([result.blob], "purre-studio." + result.extension, { type: result.mimeType });
         if (publish) {
           const coverBlob = await captureCover(clips);
-          await onPublish?.({ kind: "video", files: [file], coverBlob, meta: { filter: active?.filter, textLayers, stickers, musicTitle: audio.music?.title ?? null, musicUrl: audio.music?.url ?? null } });
+          await onPublish?.({ kind: "video", files: [file], coverBlob, meta: { filter: active?.filter, textLayers, stickers, musicTitle: audio.music?.title ?? null, musicUrl: audio.music?.url ?? null, hasAudio: Boolean(audio.music?.element || audio.voice?.element) } });
         } else {
           const url = URL.createObjectURL(result.blob);
           const anchor = document.createElement("a");
@@ -529,11 +594,11 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] flex flex-col bg-black/95 backdrop-blur">
-      <header className="flex items-center gap-2 px-3 py-2">
-        <p className="font-display text-sm text-white">PURRE PETS STUDIO</p>
+    <div className="purre-studio fixed inset-0 z-[70] flex h-[100dvh] flex-col overflow-hidden bg-[#08090d] text-white backdrop-blur-xl">
+      <header className="relative z-20 flex shrink-0 items-center gap-3 border-b border-white/[0.08] bg-[#0c0c12]/95 px-4 py-3 shadow-2xl shadow-black/20 sm:px-6">
+        <p className="font-display bg-gradient-to-r from-white via-white to-fuchsia-300 bg-clip-text text-sm font-black tracking-[0.2em] text-transparent sm:text-base">PURRE PETS STUDIO</p>
         <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-white/70">{fmtLabel}</span>
-        <div className="ml-auto flex items-center gap-1">
+        <div className="ml-auto flex items-center gap-1.5">
           <button type="button" onClick={undo} disabled={!past.current.length} className="grid h-8 w-8 place-items-center rounded-lg bg-white/10 text-white disabled:opacity-40" aria-label="Cofnij"><Undo2 className="h-4 w-4" /></button>
           <button type="button" onClick={redo} disabled={!future.current.length} className="grid h-8 w-8 place-items-center rounded-lg bg-white/10 text-white disabled:opacity-40" aria-label="Ponów"><Redo2 className="h-4 w-4" /></button>
           <button type="button" onClick={resetActive} disabled={!active} className="grid h-8 w-8 place-items-center rounded-lg bg-white/10 text-white disabled:opacity-40" aria-label="Reset"><RotateCcw className="h-4 w-4" /></button>
@@ -549,9 +614,9 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 px-3 pb-3 lg:flex-row">
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-3xl bg-zinc-950 ring-1 ring-white/10">
+      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3 sm:p-4 lg:flex-row lg:gap-5 lg:p-5">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
+          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[1.75rem] border border-white/[0.09] bg-[radial-gradient(ellipse_at_center,_#24202e_0%,_#111018_48%,_#08090d_100%)] shadow-[0_24px_90px_-35px_rgba(0,0,0,0.9)] ring-1 ring-white/[0.04]">
             {isVideo ? (
               <VideoPreview items={items} activeId={active?.id} videoRefs={videoRefs} textLayers={textLayers} stickers={stickers} audio={audio} selectedLayerId={selectedLayerId} />
             ) : active ? (
@@ -570,39 +635,50 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
               </button>
             )}
           </div>
-          <div className="no-scrollbar mt-2 flex items-center gap-2 overflow-x-auto pb-1">
+          <div className="no-scrollbar flex shrink-0 items-center gap-2 overflow-x-auto rounded-2xl border border-white/[0.07] bg-[#111118]/90 p-2 pb-2 shadow-xl">
             {items.map((item, index) => (
-              <button key={item.id} type="button" onClick={() => setActiveId(item.id)} className={cn("relative h-16 w-11 shrink-0 overflow-hidden rounded-lg border", item.id === active?.id ? "border-aura" : "border-white/15")}>
+              <button key={item.id} type="button" onClick={() => setActiveId(item.id)} className={cn("relative h-[4.25rem] w-[3.1rem] shrink-0 overflow-hidden rounded-xl border-2 transition-all duration-200", item.id === active?.id ? "border-fuchsia-400 shadow-[0_0_18px_rgba(217,70,239,0.25)]" : "border-white/10 opacity-70 hover:opacity-100")}>
                 {item.thumb ? <img src={item.thumb} alt="" className="h-full w-full object-cover" /> : <span className="grid h-full w-full place-items-center text-white/60">{item.type === "video" ? <Film className="h-4 w-4" /> : <ImageIcon className="h-4 w-4" />}</span>}
                 <span className="absolute bottom-0 left-0 bg-black/60 px-1 text-[8px] text-white">{index + 1}</span>
               </button>
             ))}
-            <button type="button" onClick={() => fileInputRef.current?.click()} className="grid h-16 w-11 shrink-0 place-items-center rounded-lg border border-dashed border-white/25 text-white/60" aria-label="Dodaj medium"><Plus className="h-4 w-4" /></button>
+            <button type="button" onClick={() => fileInputRef.current?.click()} className="grid h-[4.25rem] w-[3.1rem] shrink-0 place-items-center rounded-xl border border-dashed border-white/20 bg-white/[0.03] text-white/60 transition hover:border-fuchsia-400/60 hover:bg-fuchsia-400/10 hover:text-white" aria-label="Dodaj medium"><Plus className="h-4 w-4" /></button>
             {active && items.length > 1 && (
               <>
-                <button type="button" onClick={() => moveClip(active.id, -1)} className="grid h-16 w-9 shrink-0 place-items-center rounded-lg bg-white/10 text-white" aria-label="Przenieś w lewo"><ArrowLeft className="h-4 w-4" /></button>
-                <button type="button" onClick={() => moveClip(active.id, 1)} className="grid h-16 w-9 shrink-0 place-items-center rounded-lg bg-white/10 text-white" aria-label="Przenieś w prawo"><ArrowRight className="h-4 w-4" /></button>
+                <button type="button" onClick={() => moveClip(active.id, -1)} className="grid h-[4.25rem] w-10 shrink-0 place-items-center rounded-xl border border-white/[0.07] bg-white/[0.05] text-white/80 transition hover:bg-white/10 hover:text-white" aria-label="Przenieś w lewo"><ArrowLeft className="h-4 w-4" /></button>
+                <button type="button" onClick={() => moveClip(active.id, 1)} className="grid h-[4.25rem] w-10 shrink-0 place-items-center rounded-xl border border-white/[0.07] bg-white/[0.05] text-white/80 transition hover:bg-white/10 hover:text-white" aria-label="Przenieś w prawo"><ArrowRight className="h-4 w-4" /></button>
                 {active.type === "video" && (
-                  <button type="button" onClick={splitActive} className="grid h-16 w-9 shrink-0 place-items-center rounded-lg bg-white/10 text-white" aria-label="Przetnij klip"><Scissors className="h-4 w-4" /></button>
+                  <button type="button" onClick={splitActive} className="grid h-[4.25rem] w-10 shrink-0 place-items-center rounded-xl border border-white/[0.07] bg-white/[0.05] text-white/80 transition hover:bg-white/10 hover:text-white" aria-label="Przetnij klip"><Scissors className="h-4 w-4" /></button>
                 )}
-                <button type="button" onClick={() => removeItem(active.id)} className="grid h-16 w-9 shrink-0 place-items-center rounded-lg bg-red-500/20 text-red-300" aria-label="Usuń"><Trash2 className="h-4 w-4" /></button>
+                <button type="button" onClick={() => removeItem(active.id)} className="grid h-[4.25rem] w-10 shrink-0 place-items-center rounded-xl border border-red-400/20 bg-red-500/10 text-red-300 transition hover:bg-red-500/20" aria-label="Usuń"><Trash2 className="h-4 w-4" /></button>
               </>
             )}
           </div>
         </div>
 
-        <div className="no-scrollbar flex w-full shrink-0 flex-col overflow-y-auto rounded-3xl border border-white/10 bg-card/60 p-3 lg:w-96">
-          <div className="flex flex-wrap gap-1">
+        <div className="no-scrollbar flex max-h-[43dvh] w-full shrink-0 flex-col overflow-y-auto rounded-[1.5rem] border border-white/[0.09] bg-[#12121a]/95 p-3 shadow-[0_20px_70px_-30px_rgba(0,0,0,0.9)] backdrop-blur-2xl sm:p-4 lg:max-h-none lg:w-[22rem] lg:rounded-[1.75rem] lg:p-5">
+          <div className="no-scrollbar flex shrink-0 gap-1.5 overflow-x-auto border-b border-white/[0.08] pb-3">
             {TABS.map(({ id, label, Icon }) => (
-              <button key={id} type="button" onClick={() => setTab(id)} className={cn("flex items-center gap-1 rounded-lg px-2 py-1.5 text-[9px] font-semibold uppercase tracking-wider", tab === id ? "bg-aura text-black" : "bg-white/5 text-white/70")}>
+              <button key={id} type="button" onClick={() => setTab(id)} className={cn("flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-[9px] font-bold uppercase tracking-wider transition-all duration-200", tab === id ? "border-fuchsia-400/40 bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/20" : "border-white/[0.07] bg-white/[0.035] text-white/55 hover:border-white/20 hover:bg-white/[0.08] hover:text-white")}>
                 <Icon className="h-3 w-3" /> {label}
               </button>
             ))}
           </div>
 
-          <div className="mt-3 space-y-3 text-white">
+          <div className="mt-4 min-h-0 space-y-4 px-0.5 pb-2 text-white [&_input:not([type=range]):not([type=color]):not([type=checkbox])]:outline-none [&_input:not([type=range]):not([type=color]):not([type=checkbox])]:focus:border-fuchsia-400/60 [&_button]:transition-all [&_button]:duration-200">
             {tab === "edit" && active && (
               <>
+                {active.type === "image" && (
+                  <Slider
+                    label="Czas zdjęcia (sekundy)"
+                    min={1}
+                    max={30}
+                    step={0.5}
+                    value={active.duration || 3}
+                    onChange={(v) => updateActive({ duration: v }, false)}
+                    onCommit={pushHistory}
+                  />
+                )}
                 <Slider label="Jasność" min={0} max={200} value={active.brightness} onChange={(v) => updateActive({ brightness: v }, false)} onCommit={pushHistory} />
                 <Slider label="Kontrast" min={0} max={200} value={active.contrast} onChange={(v) => updateActive({ contrast: v }, false)} onCommit={pushHistory} />
                 <Slider label="Nasycenie" min={0} max={200} value={active.saturation} onChange={(v) => updateActive({ saturation: v }, false)} onCommit={pushHistory} />
@@ -627,9 +703,9 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
               <>
                 <button type="button" onClick={addTextLayer} className="btn-aura w-full rounded-xl py-2 text-[10px] font-semibold uppercase tracking-widest">Dodaj warstwę tekstu</button>
                 {textLayers.map((layer, index) => (
-                  <div key={layer.id} className={cn("rounded-xl border p-2", selectedLayerId === layer.id ? "border-aura" : "border-white/15")}>
+                  <div key={layer.id} className={cn("group rounded-2xl border bg-gradient-to-br from-white/[0.055] to-white/[0.015] p-3 shadow-lg shadow-black/10 transition-all duration-200", selectedLayerId === layer.id ? "border-fuchsia-400/50 ring-1 ring-fuchsia-400/20 shadow-fuchsia-500/10" : "border-white/[0.08] hover:border-white/20")}>
                     <div className="flex items-center gap-1">
-                      <input value={layer.text} onFocus={() => setSelectedLayerId(layer.id)} onChange={(e) => patchLayer(setTextLayers, layer.id, { text: e.target.value })} className="h-8 flex-1 rounded-lg border border-white/15 bg-black/30 px-2 text-xs" maxLength={160} />
+                      <input value={layer.text} onFocus={() => setSelectedLayerId(layer.id)} onChange={(e) => patchLayer(setTextLayers, layer.id, { text: e.target.value })} className="h-10 flex-1 rounded-xl border border-white/10 bg-black/30 px-3 text-xs text-white placeholder:text-white/30 focus:border-fuchsia-400/60 focus:ring-2 focus:ring-fuchsia-400/10" maxLength={160} />
                       <button type="button" onClick={() => removeLayer(layer.id)} className="text-white/60 hover:text-red-400" aria-label="Usuń warstwę"><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
                     {selectedLayerId === layer.id && (
@@ -638,7 +714,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
                         <Slider label="Obrót" min={-180} max={180} value={layer.rotation} onChange={(v) => patchLayer(setTextLayers, layer.id, { rotation: v })} />
                         <div className="flex gap-1">
                           {FONTS.map((font) => (
-                            <button key={font.id} type="button" onClick={() => patchLayer(setTextLayers, layer.id, { fontFamily: font.id })} className={cn("flex-1 rounded-lg border py-1 text-[9px]", layer.fontFamily === font.id ? "border-aura text-aura" : "border-white/15 text-white/60")}>{font.label}</button>
+                            <button key={font.id} type="button" onClick={() => patchLayer(setTextLayers, layer.id, { fontFamily: font.id })} className={cn("flex-1 rounded-xl border py-2 text-[9px] font-semibold transition", layer.fontFamily === font.id ? "border-fuchsia-400/50 bg-fuchsia-500/15 text-fuchsia-200" : "border-white/[0.08] bg-white/[0.025] text-white/55 hover:bg-white/[0.07] hover:text-white")}>{font.label}</button>
                           ))}
                         </div>
                         <div className="flex items-center gap-2">
@@ -659,11 +735,11 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
               <>
                 <div className="flex flex-wrap gap-1.5">
                   {STICKERS.map((emoji) => (
-                    <button key={emoji} type="button" onClick={() => addStickerLayer(emoji)} className="grid h-9 w-9 place-items-center rounded-xl border border-white/15 text-lg">{emoji}</button>
+                    <button key={emoji} type="button" onClick={() => addStickerLayer(emoji)} className="grid h-12 w-12 place-items-center rounded-2xl border border-white/[0.08] bg-gradient-to-br from-white/[0.07] to-white/[0.015] text-2xl shadow-lg shadow-black/10 transition duration-200 hover:scale-110 hover:border-fuchsia-400/50 hover:bg-fuchsia-500/10 active:scale-95">{emoji}</button>
                   ))}
                 </div>
                 {stickers.map((layer) => (
-                  <div key={layer.id} className={cn("rounded-xl border p-2", selectedLayerId === layer.id ? "border-aura" : "border-white/15")}>
+                  <div key={layer.id} className={cn("group rounded-2xl border bg-gradient-to-br from-white/[0.055] to-white/[0.015] p-3 shadow-lg shadow-black/10 transition-all duration-200", selectedLayerId === layer.id ? "border-fuchsia-400/50 ring-1 ring-fuchsia-400/20 shadow-fuchsia-500/10" : "border-white/[0.08] hover:border-white/20")}>
                     <div className="flex items-center justify-between text-[11px]">
                       <span>{layer.text}</span>
                       <button type="button" onClick={() => removeLayer(layer.id)} className="text-white/60 hover:text-red-400" aria-label="Usuń naklejkę"><Trash2 className="h-3.5 w-3.5" /></button>
@@ -679,7 +755,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
               </>
             )}
             {tab === "audio" && (
-              isVideo ? (
+              items.length > 0 ? (
                 <>
                   <p className="text-[9px] uppercase tracking-widest text-white/50">Muzyka (biblioteka PURRE / urządzenie)</p>
                   <SoundPicker value={audio.music} onChange={pickMusicTrack} />
@@ -690,8 +766,8 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
                   <Slider label="Głośność muzyki" min={0} max={1} step={0.05} value={audio.musicVolume} onChange={(v) => setAudio((prev) => ({ ...prev, musicVolume: v }))} />
                   <Slider label="Fade in (s)" min={0} max={5} step={0.5} value={audio.musicFadeIn} onChange={(v) => setAudio((prev) => ({ ...prev, musicFadeIn: v }))} />
                   <Slider label="Fade out (s)" min={0} max={5} step={0.5} value={audio.musicFadeOut} onChange={(v) => setAudio((prev) => ({ ...prev, musicFadeOut: v }))} />
-                  <div className="rounded-xl border border-white/15 p-2">
-                    <button type="button" onClick={toggleRecording} className={cn("flex w-full items-center justify-center gap-2 rounded-lg py-2 text-[10px] font-semibold uppercase tracking-widest", recording ? "bg-red-500 text-white" : "bg-white/10 text-white")}>
+                  <div className="rounded-2xl border border-white/[0.09] bg-gradient-to-br from-white/[0.055] to-transparent p-3 shadow-xl shadow-black/10">
+                    <button type="button" onClick={toggleRecording} className={cn("flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 py-3 text-[10px] font-bold uppercase tracking-widest transition", recording ? "border-red-400/40 bg-red-500 text-white shadow-lg shadow-red-500/20" : "bg-white/[0.06] text-white hover:border-fuchsia-400/40 hover:bg-white/10")}>
                       <Mic className="h-3.5 w-3.5" /> {recording ? "Zatrzymaj nagrywanie" : "Nagraj voiceover"}
                     </button>
                     {audio.voice && (
@@ -782,13 +858,23 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
 
 function Slider({ label, min, max, step = 1, value, onChange, onCommit }) {
   return (
-    <label className="block text-[10px] uppercase tracking-wider text-white/60">
-      {label} <span className="text-white/40">({value})</span>
+    <label className="group block rounded-xl border border-white/[0.055] bg-white/[0.018] px-3 py-2.5 text-[10px] uppercase tracking-wider text-white/65 transition hover:border-white/[0.12]">
+      <span className="flex items-center justify-between gap-3">
+        <span className="font-semibold tracking-[0.12em]">{label}</span>
+        <span className="rounded-lg border border-fuchsia-400/20 bg-fuchsia-500/10 px-2 py-1 font-mono text-[10px] font-bold tabular-nums text-fuchsia-200">
+          {value}
+        </span>
+      </span>
       <input
-        type="range" min={min} max={max} step={step} value={value}
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         onPointerUp={onCommit}
-        className="mt-1 w-full"
+        onKeyUp={onCommit}
+        className="mt-3 h-1.5 w-full cursor-pointer appearance-none rounded-full bg-white/15 accent-fuchsia-400 transition"
       />
     </label>
   );

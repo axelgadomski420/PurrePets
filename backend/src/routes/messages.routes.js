@@ -14,36 +14,90 @@ const typingMap = new Map(); // conversation_id -> Map(user_id -> { name, ts })
 
 const sendSchema = z.object({
   conversation_id: z.string().trim().min(1).optional(),
+  conversationId: z.string().trim().min(1).optional(),
   recipient_id: z.string().trim().min(1).optional(),
+  recipientId: z.string().trim().min(1).optional(),
   content: z.string().max(4000).optional(),
-  ciphertext: z.string().max(16000).optional(), // E2E: AES-GCM (ECDH P-256), serwer nie widzi treści
+  ciphertext: z.string().max(16000).optional(),
   iv: z.string().max(200).optional(),
   e2e: z.boolean().optional(),
   media_url: z.string().trim().max(500).optional(),
-  media_type: z.enum(["image", "video", "audio", "file"]).optional(), // "file" = dowolny załącznik (PDF, dokument…)
-}).refine((d) => d.conversation_id || d.recipient_id, { message: "conversation_id albo recipient_id" })
-  .refine((d) => (d.content && d.content.length) || d.ciphertext || d.media_url, { message: "Treść albo załącznik" });
+  media_type: z.enum(["image", "video", "audio", "file"]).optional(),
+})
+  .refine(
+    (data) =>
+      data.conversation_id ||
+      data.conversationId ||
+      data.recipient_id ||
+      data.recipientId,
+    { message: "conversation_id albo recipient_id" }
+  )
+  .refine(
+    (data) =>
+      (typeof data.content === "string" && data.content.length > 0) ||
+      !!data.ciphertext ||
+      !!data.media_url,
+    { message: "Treść albo załącznik" }
+  )
 
-async function getOrCreateConversation(userId, { conversationId, recipientId }) {
+async function getOrCreateConversation(userId, input = {}) {
+  const conversationId = input.conversation_id ?? input.conversationId;
+  const recipientId = input.recipient_id ?? input.recipientId;
+
   if (conversationId) {
-    const conv = await prisma.conversation.findUnique({ where: { id: conversationId } });
+    const conv = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+    });
+
     if (!conv) throw notFound("Nie znaleziono rozmowy");
-    if (!conv.members.includes(userId)) throw forbidden("Nie jesteś uczestnikiem rozmowy");
+
+    if (!Array.isArray(conv.members) || !conv.members.includes(userId)) {
+      throw forbidden("Nie jesteś uczestnikiem rozmowy");
+    }
+
     return conv;
   }
+
+  if (!recipientId || typeof recipientId !== "string") {
+    throw badRequest("Brakuje identyfikatora odbiorcy wiadomości");
+  }
+
+  if (recipientId === userId) {
+    throw badRequest("Nie możesz rozpocząć rozmowy z samym sobą");
+  }
+
   const existing = await prisma.conversation.findFirst({
-    where: { members: { has: userId }, AND: { members: { has: recipientId } } },
+    where: {
+      members: {
+        hasEvery: [userId, recipientId],
+      },
+    },
+    orderBy: { created_date: "asc" },
   });
+
   if (existing) return existing;
+
   const [me, them] = await Promise.all([
-    prisma.user.findUnique({ where: { id: userId } }),
-    prisma.user.findUnique({ where: { id: recipientId } }),
+    prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, full_name: true, email: true },
+    }),
+    prisma.user.findUnique({
+      where: { id: recipientId },
+      select: { id: true, full_name: true, email: true },
+    }),
   ]);
-  if (!them) throw notFound("Nie znaleziono adresata");
+
+  if (!me) throw notFound("Nie znaleziono konta nadawcy");
+  if (!them) throw notFound("Nie znaleziono odbiorcy");
+
   return prisma.conversation.create({
     data: {
       members: [userId, recipientId],
-      member_names: [me?.full_name || me?.email || "", them?.full_name || them?.email || ""],
+      member_names: [
+        me.full_name || me.email || "",
+        them.full_name || them.email || "",
+      ],
       created_by_id: userId,
     },
   });

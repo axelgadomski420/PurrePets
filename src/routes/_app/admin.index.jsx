@@ -22,6 +22,10 @@ function AdminPage() {
   const [busy, setBusy] = useState("");
   const [tab, setTab] = useState("overview");
   const [documentPreview, setDocumentPreview] = useState(null);
+  const [mediaItems, setMediaItems] = useState([]);
+  const [mediaPreviews, setMediaPreviews] = useState({});
+  const [mediaLoading, setMediaLoading] = useState(false);
+  const [mediaBusy, setMediaBusy] = useState("");
 
   useEffect(() => {
     return () => {
@@ -42,6 +46,64 @@ function AdminPage() {
   useEffect(() => {
     if (canModerate(user)) load();
   }, [user?.role]);
+
+
+  const loadMediaQueue = async () => {
+    setMediaLoading(true);
+    try {
+      const payload = await base44.admin.mediaModeration();
+      setMediaItems(Array.isArray(payload?.items) ? payload.items : []);
+    } catch (err) {
+      toast.error(err?.message ?? "Nie udało się pobrać kolejki mediów");
+    } finally {
+      setMediaLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (tab === "media") loadMediaQueue();
+  }, [tab]);
+
+  const openMediaPreview = async (id) => {
+    if (mediaPreviews[id]) return;
+    try {
+      const blob = await base44.admin.getMediaPreview(id);
+      const url = URL.createObjectURL(blob);
+      setMediaPreviews((current) => ({ ...current, [id]: url }));
+    } catch (err) {
+      toast.error(err?.message ?? "Nie udało się otworzyć podglądu");
+    }
+  };
+
+  const decideMedia = async (id, action) => {
+    setMediaBusy(id + action);
+    try {
+      await base44.admin.reviewMedia(id, {
+        action,
+        reason: action === "reject" ? "Odrzucono przez moderatora." : undefined,
+      });
+
+      if (mediaPreviews[id]) URL.revokeObjectURL(mediaPreviews[id]);
+
+      setMediaPreviews((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+
+      toast.success(
+        action === "approve"
+          ? "Materiał zatwierdzony i opublikowany"
+          : "Materiał odrzucony"
+      );
+
+      await loadMediaQueue();
+    } catch (err) {
+      toast.error(err?.message ?? "Nie udało się zapisać decyzji");
+    } finally {
+      setMediaBusy("");
+    }
+  };
 
   const decide = async (id, status) => {
     setBusy(id + status);
@@ -141,7 +203,7 @@ function AdminPage() {
         </h1>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          {["overview", "verifications", "listings", "posts"].map((key) => (
+          {["overview", "verifications", "listings", "posts", "media"].map((key) => (
             <button
               key={key}
               type="button"
@@ -154,6 +216,7 @@ function AdminPage() {
               {key === "verifications" && "Weryfikacje"}
               {key === "listings" && "Ogłoszenia"}
               {key === "posts" && "Posty"}
+              {key === "media" && "Moderacja mediów"}
             </button>
           ))}
         </div>
@@ -347,6 +410,132 @@ function AdminPage() {
             </div>
           </section>
         )}
+
+        {tab === "media" && (
+          <section className="mt-8">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold">
+                  Expurr — moderacja multimediów
+                </h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Materiały pozostają w prywatnej kwarantannie do decyzji moderatora.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={loadMediaQueue}
+                disabled={mediaLoading}
+                className="rounded-xl border border-border/70 px-3 py-2 text-xs"
+              >
+                {mediaLoading ? "Odświeżanie..." : "Odśwież kolejkę"}
+              </button>
+            </div>
+
+            {mediaLoading && (
+              <p className="mt-4 text-sm text-muted-foreground">
+                Pobieranie kolejki...
+              </p>
+            )}
+
+            {!mediaLoading && mediaItems.length === 0 && (
+              <p className="mt-4 text-sm text-muted-foreground">
+                Brak materiałów oczekujących na decyzję.
+              </p>
+            )}
+
+            <div className="mt-4 grid min-w-0 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+              {mediaItems.map((item) => (
+                <article
+                  key={item.id}
+                  className="min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-card/60 p-3"
+                >
+                  <div className="flex min-w-0 items-center justify-between gap-2">
+                    <p className="min-w-0 break-words text-sm font-semibold">
+                      {item.original_name || "Przesłany obraz"}
+                    </p>
+                    <span className="shrink-0 rounded-lg border border-border px-2 py-1 text-[10px]">
+                      {item.status}
+                    </span>
+                  </div>
+
+                  <p className="mt-1 break-all text-[10px] text-muted-foreground">
+                    {item.mime_type || "Nieznany format"} ·
+                    {Math.round((item.size || 0) / 1024)} KB
+                  </p>
+
+                  {mediaPreviews[item.id] ? (
+                    <img
+                      src={mediaPreviews[item.id]}
+                      alt="Prywatny podgląd materiału"
+                      className="mt-3 max-h-72 w-full rounded-xl bg-black/10 object-contain"
+                    />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => openMediaPreview(item.id)}
+                      className="mt-3 w-full rounded-xl border border-border/70 px-3 py-3 text-xs"
+                    >
+                      Otwórz prywatny podgląd
+                    </button>
+                  )}
+
+                  {item.analysis && (
+                    <div className="mt-3 rounded-xl bg-background/60 p-3">
+                      <p className="text-xs font-semibold">Analiza Qwen3-VL</p>
+                      <p className="mt-1 break-words text-xs text-muted-foreground">
+                        {item.analysis.summary || "Brak opisu analizy."}
+                      </p>
+                      <p className="mt-2 text-[10px] text-muted-foreground">
+                        Decyzja: {item.analysis.decision || item.decision || "brak"}
+                        {" · "}
+                        Pewność: {typeof item.analysis.confidence === "number"
+                          ? Math.round(item.analysis.confidence * 100) + "%"
+                          : "brak danych"}
+                      </p>
+                      {Array.isArray(item.analysis.categories) &&
+                        item.analysis.categories.length > 0 && (
+                          <p className="mt-1 break-words text-[10px] text-muted-foreground">
+                            Kategorie: {item.analysis.categories.join(", ")}
+                          </p>
+                        )}
+                    </div>
+                  )}
+
+                  <p className="mt-2 text-[10px] text-muted-foreground">
+                    Dodano: {item.created_at
+                      ? new Date(item.created_at).toLocaleString("pl-PL")
+                      : "—"}
+                  </p>
+
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      disabled={mediaBusy !== "" || item.status !== "review"}
+                      onClick={() => decideMedia(item.id, "approve")}
+                      className="btn-aura rounded-xl px-3 py-2 text-[10px] font-semibold disabled:opacity-40"
+                    >
+                      {mediaBusy === item.id + "approve"
+                        ? "Zapisywanie..."
+                        : "Zatwierdź i publikuj"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={mediaBusy !== ""}
+                      onClick={() => decideMedia(item.id, "reject")}
+                      className="rounded-xl border border-border/70 px-3 py-2 text-[10px] font-semibold disabled:opacity-40"
+                    >
+                      {mediaBusy === item.id + "reject"
+                        ? "Odrzucanie..."
+                        : "Odrzuć"}
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
       </div>
     </div>
   );

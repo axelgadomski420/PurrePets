@@ -408,6 +408,11 @@ export default function ProfileView({ profileId }) {
             {data.locked && <Lock className="h-4 w-4 text-muted-foreground" />}
           </h1>
           <p className="text-[11px] text-muted-foreground">{profile.handle || "—"}</p>
+          {(role === "admin" || role === "moderator") && (
+            <p className="mt-1 text-[10px] font-semibold uppercase tracking-widest">
+              {role === "admin" ? "Rola konta: Administrator" : "Rola konta: Moderator"}
+            </p>
+          )}
           {profile.city && (
             <p className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground">
               <MapPin className="h-3 w-3" /> {profile.city}
@@ -473,12 +478,12 @@ export default function ProfileView({ profileId }) {
           >
             <Share2 className="h-3 w-3" /> Udostępnij
           </button>
-          {role === "admin" && (
+          {(role === "admin" || role === "moderator") && (
             <Link
               to="/admin"
               className="flex items-center gap-1 rounded-xl border border-amber-400/50 px-3 py-2 text-[10px] uppercase tracking-[0.16em] text-amber-300"
             >
-              <Shield className="h-3 w-3" /> Panel administratora
+              <Shield className="h-3 w-3" /> {role === "admin" ? "Panel administratora" : "Panel moderatora"}
             </Link>
           )}
         </div>
