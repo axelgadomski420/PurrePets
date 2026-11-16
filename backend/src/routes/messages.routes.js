@@ -20,7 +20,7 @@ const sendSchema = z.object({
   iv: z.string().max(200).optional(),
   e2e: z.boolean().optional(),
   media_url: z.string().trim().max(500).optional(),
-  media_type: z.enum(["image", "video"]).optional(),
+  media_type: z.enum(["image", "video", "audio", "file"]).optional(), // "file" = dowolny załącznik (PDF, dokument…)
 }).refine((d) => d.conversation_id || d.recipient_id, { message: "conversation_id albo recipient_id" })
   .refine((d) => (d.content && d.content.length) || d.ciphertext || d.media_url, { message: "Treść albo załącznik" });
 
@@ -50,7 +50,12 @@ async function getOrCreateConversation(userId, { conversationId, recipientId }) 
 }
 
 function previewOf(data) {
-  if (data.media_url) return data.media_type === "video" ? "📹 Wideo" : "🖼 Zdjęcie";
+  if (data.media_url) {
+    if (data.media_type === "video") return "📹 Wideo";
+    if (data.media_type === "audio") return "🎵 Audio";
+    if (data.media_type === "file") return "📎 Plik";
+    return "🖼 Zdjęcie";
+  }
   if (data.e2e) return "🔒 Wiadomość zaszyfrowana";
   return (data.content || "").slice(0, 120);
 }

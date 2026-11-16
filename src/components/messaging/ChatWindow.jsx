@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, CheckCheck, Image as ImageIcon, Loader2, Lock, MoreVertical, Phone, Search, Send, Smile, Trash2, Video } from "lucide-react";
+import { Check, CheckCheck, File as FileIcon, Image as ImageIcon, Loader2, Lock, MoreVertical, Paperclip, Phone, Search, Send, Smile, Trash2, Video } from "lucide-react";
 import { toast } from "sonner";
 import { io } from "socket.io-client";
 import { base44, messagesApi } from "@/api/base44Client";
@@ -42,6 +42,7 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
   const endRef = useRef(null);
   const topRef = useRef(null);
   const fileRef = useRef(null);
+  const docRef = useRef(null);
   const listRef = useRef(null);
   const socketRef = useRef(null);
   const lastTypingSent = useRef(0);
@@ -182,7 +183,13 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
     setBusy(true);
     try {
       const up = await base44.integrations.Core.UploadPublicFile({ file });
-      const media_type = file.type.startsWith("video") ? "video" : "image";
+      const media_type = file.type.startsWith("video")
+        ? "video"
+        : file.type.startsWith("image")
+          ? "image"
+          : file.type.startsWith("audio")
+            ? "audio"
+            : "file"; // dowolny plik: PDF, dokument, archiwum…
       const res = await messagesApi.send({
         conversation_id: conversationId,
         recipient_id: peerId,
@@ -288,6 +295,19 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
                 {m.media_url && (
                   m.media_type === "video" ? (
                     <video src={m.media_url} controls className="mb-1 max-h-56 rounded-xl" />
+                  ) : m.media_type === "audio" ? (
+                    <audio src={m.media_url} controls className="mb-1 max-w-full" />
+                  ) : m.media_type === "file" ? (
+                    <a
+                      href={m.media_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      download
+                      className="mb-1 flex items-center gap-2 rounded-xl border border-border/60 bg-background/40 px-3 py-2 text-xs hover:underline"
+                    >
+                      <FileIcon className="h-4 w-4 shrink-0" />
+                      <span className="truncate">Pobierz plik</span>
+                    </a>
                   ) : (
                     <img src={m.media_url} alt="" className="mb-1 max-h-56 rounded-xl object-cover" />
                   )
@@ -339,6 +359,18 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
         />
         <button type="button" onClick={() => fileRef.current?.click()} className="grid h-10 w-10 place-items-center rounded-xl border border-border/60" aria-label="Zdjęcie lub wideo">
           <ImageIcon className="h-4 w-4" />
+        </button>
+        <input
+          ref={docRef}
+          type="file"
+          className="hidden"
+          onChange={(e) => {
+            sendMedia(e.target.files?.[0]);
+            e.target.value = "";
+          }}
+        />
+        <button type="button" onClick={() => docRef.current?.click()} className="grid h-10 w-10 place-items-center rounded-xl border border-border/60" aria-label="Załącz plik" title="Załącz dowolny plik">
+          <Paperclip className="h-4 w-4" />
         </button>
         <input
           value={input}
