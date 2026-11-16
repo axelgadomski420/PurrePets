@@ -7,13 +7,24 @@ import { notify } from "./notifications.routes.js";
 
 export const storiesRouter = Router();
 
+// Wspólny katalog presetów PURRE PETS STUDIO (zgodny z frontendem; "none" = brak).
+const STORY_FILTER_IDS = ["none", "aurora", "warm", "cool", "mono", "vivid", "fade", "drama", "dream"];
+
+function normalizeFilter(value) {
+  const id = String(value ?? "").trim();
+  if (!id || id === "none") return null;
+  return STORY_FILTER_IDS.includes(id) ? id : null;
+}
+
 const createSchema = z.object({
   media_url: z.string().trim().min(4).max(500),
   media_type: z.enum(["image", "video"]).default("image"),
   caption: z.string().trim().max(300).optional(),
   music_title: z.string().trim().max(120).optional(),
   music_url: z.string().trim().max(500).nullable().optional(),
-  filter: z.enum(["warm", "cool", "mono", "vivid", "fade", "drama"]).nullable().optional(),
+  // Katalog filtrów = STUDIO_FILTERS z src/lib/purre-studio.js (frontend).
+  // Nieznane presety są bezpiecznie normalizowane do null — zero 400 przy nowych presetach.
+  filter: z.string().trim().max(40).nullable().optional(),
   overlay_text: z.string().trim().max(80).nullable().optional(),
   overlay_position: z.enum(["top", "center", "bottom"]).nullable().optional(),
 });
@@ -35,7 +46,7 @@ storiesRouter.post(
         caption: data.caption ?? null,
         music_title: data.music_title ?? null,
         music_url: data.music_url ?? null,
-        filter: data.filter ?? null,
+        filter: normalizeFilter(data.filter),
         overlay_text: data.overlay_text ?? null,
         overlay_position: data.overlay_position ?? null,
         expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000),
@@ -116,11 +127,16 @@ storiesRouter.post(
   asyncHandler(async (req, res) => {
     const story = await prisma.story.findUnique({ where: { id: req.params.id } });
     if (!story || story.expires_at < new Date()) throw notFound("Relacja wygasła");
+    // Dedupe: ta sama osoba liczy się raz (fix wielokrotnego naliczania wyświetleń).
+    const viewers = Array.isArray(story.viewers) ? story.viewers : [];
+    if (viewers.includes(req.user.id)) {
+      return res.json({ views: story.views, already: true });
+    }
     const updated = await prisma.story.update({
       where: { id: story.id },
       data: { views: { increment: 1 }, viewers: { push: req.user.id } },
     });
-    res.json({ views: updated.views });
+    res.json({ views: updated.views, already: false });
   })
 );
 

@@ -48,7 +48,15 @@ model Profile {
   website_url   String?  // strona hodowli
   instagram_url String?  // socials (profil PRO)
   tiktok_url    String?
+  facebook_url  String?  // socials (profil ULTRA)
+  youtube_url   String?  // socials (profil ULTRA)
   gallery_urls  String[] @default([]) // galeria profilu (max 12)
+  // Prywatność profilu (ULTRA) — decyzje właściciela, egzekwowane w /api/profile/:id/public.
+  is_private        Boolean @default(false) // profil publiczny/prywatny
+  show_gallery      Boolean @default(true)  // widoczność galerii
+  show_followers    Boolean @default(true)  // widoczność list obserwujących/obserwowanych
+  show_stats        Boolean @default(true)  // widoczność statystyk dla odwiedzających
+  show_kennel_data  Boolean @default(true)  // widoczność danych hodowli (gatunki, rasy)
   created_by_id String?
   created_date  DateTime @default(now())
   updated_date  DateTime @updatedAt
@@ -653,4 +661,22 @@ model StripeWebhookEvent {
 
   @@index([created_date])
   @@map("stripe_webhook_events")
+}
+
+// ============================================================
+// MODUŁ PROFIL ULTRA — odwiedziny profilu.
+// Dedupe: 1 wiersz na (profil, odwiedzający, dzień UTC) — unikalny
+// indeks chroni przed botami/odświeżaniem i wielokrotnym naliczaniem.
+// ============================================================
+model ProfileVisit {
+  id              String   @id @default(cuid())
+  profile_user_id String
+  visitor_id      String
+  visit_day       DateTime // dzień UTC (północ) — klucz dedupe
+  created_by_id   String?
+  created_date    DateTime @default(now())
+
+  @@unique([profile_user_id, visitor_id, visit_day])
+  @@index([profile_user_id, visit_day])
+  @@map("profile_visits")
 }

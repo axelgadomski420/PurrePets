@@ -73,3 +73,21 @@ npx prisma migrate deploy
 pg_restore -U purre -h 127.0.0.1 -d postgres -c purrepets-backup-<STAMP>.dump
 ```
 Migracje addytywne (kolumny/tabele) nie usuwają danych — rollback kodu nie wymaga rollbacku bazy.
+
+
+## 20261116120000_profile_studio_upgrade (profil ULTRA — NIEZASTOSOWANA na produkcji)
+
+**Charakter:** wyłącznie addytywna — nowe kolumny z DEFAULT + nowa tabela. Bezpieczna dla danych.
+
+| Obiekt | Zmiana | Odwracalna |
+|---|---|---|
+| profiles | + facebook_url, youtube_url, is_private, show_gallery, show_followers, show_stats, show_kennel_data | tak (DROP COLUMN) |
+| profile_visits | nowa tabela + unikalny indeks (profile_user_id, visitor_id, visit_day) | tak (DROP TABLE) |
+
+**Procedura wdrożenia (bez auto-baseline):**
+1. Porównaj schemat z bazą: `pg_dump --schema-only` / information_schema vs `prisma migrate diff`.
+2. `npx prisma migrate resolve --applied` dla wszystkich 8 wcześniejszych migracji (jeśli jeszcze nie oznaczone).
+3. `npx prisma migrate deploy` — zastosuje wyłącznie 20261116120000.
+4. Rollback awaryjny: sekcja DOWN w migration.sql albo `pg_restore` z backupu.
+
+**Backwards-compat:** stary kod aplikacji działa bez tych kolumn (DEFAULT-y); nowy kod działa też na starej bazie do czasu migracji (endpointy prywatności zwrócą błędy kolumn — wdrożenie migracji przed wdrożeniem frontendu).
