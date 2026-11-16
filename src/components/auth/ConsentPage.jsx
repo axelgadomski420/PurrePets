@@ -1,4 +1,7 @@
-import { getAccessToken } from "@base44/sdk";
+// Standalone: token czytany z localStorage (bez @base44/sdk).
+const getAccessToken = () => {
+  try { return localStorage.getItem("purre_access_token"); } catch { return null; }
+};
 import { Loader2, ShieldCheck } from "lucide-react";
 import { Fragment, useEffect, useState } from "react";
 import { AuthLayout } from "@/components/auth/AuthLayout";
