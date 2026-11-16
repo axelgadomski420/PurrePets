@@ -177,6 +177,8 @@ adminRouter.patch(
 // dokumentu prywatnego. Dostęp wyłącznie dla moderatora/admina.
 adminRouter.get(
   "/verification/:id/document",
+  requireAuth,
+  requireModerator,
   asyncHandler(async (req, res) => {
     const request = await prisma.verificationRequest.findUnique({
       where: { id: req.params.id },

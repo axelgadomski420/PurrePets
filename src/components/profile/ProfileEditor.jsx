@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Camera, Image as ImageIcon, Save } from "lucide-react";
 import { toast } from "sonner";
-import { base44, profileApi } from "@/api/base44Client";
+import { base44, profileApi, getUploadedFileUrl, getUploadErrorMessage } from "@/api/base44Client";
 import { cn } from "@/lib/utils";
 
 /**
@@ -40,13 +40,7 @@ export default function ProfileEditor({ onSaved, className }) {
     }
 
     const up = await base44.integrations.Core.UploadPublicFile({ file });
-    const url = up?.file_url || up?.url;
-
-    if (typeof url !== "string" || !url.trim()) {
-      throw new Error("Serwer nie zwrócił adresu przesłanego zdjęcia");
-    }
-
-    return url.trim();
+    return getUploadedFileUrl(up);
   };
 
   const pick = async (file, field) => {
@@ -56,7 +50,7 @@ export default function ProfileEditor({ onSaved, className }) {
       const url = await upload(file);
       setProfile((p) => ({ ...p, [field]: url }));
     } catch (err) {
-      toast.error(err?.message ?? "Upload nie powiódł się");
+      toast.error(getUploadErrorMessage(err, "Upload nie powiódł się"));
     } finally {
       setBusy(false);
     }
@@ -113,7 +107,7 @@ export default function ProfileEditor({ onSaved, className }) {
         toast.success(`Dodano ${urls.length} zdjęć. Zapisz profil, aby zatwierdzić zmiany.`);
       }
     } catch (err) {
-      toast.error(err?.message ?? "Nie udało się dodać zdjęć");
+      toast.error(getUploadErrorMessage(err, "Nie udało się dodać zdjęć"));
     } finally {
       setBusy(false);
     }
@@ -137,7 +131,7 @@ export default function ProfileEditor({ onSaved, className }) {
       toast.success("Profil zaktualizowany");
       onSaved?.(saved);
     } catch (err) {
-      toast.error(err?.message ?? "Nie udało się zapisać profilu");
+      toast.error(getUploadErrorMessage(err, "Nie udało się zapisać profilu"));
     } finally {
       setBusy(false);
     }

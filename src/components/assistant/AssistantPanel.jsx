@@ -43,15 +43,31 @@ export default function AssistantPanel() {
 
   useEffect(() => {
     if (!open) return;
-    base44.functions
-      .aiHealth()
-      .then((h) => setHealth(h))
-      .catch(() => {
-        base44.functions
-          .askAssistant({ question: "health" })
-          .then(setHealth)
-          .catch(() => null);
-      });
+
+    let active = true;
+    setHealth(null);
+
+    const loadHealth = async () => {
+      try {
+        const result = await base44.functions.aiHealth();
+        if (active) setHealth(result);
+      } catch {
+        try {
+          const result = await base44.functions.assistantHealth();
+          if (active) setHealth(result);
+        } catch {
+          if (active) {
+            setHealth({ ollama: false, model: null });
+          }
+        }
+      }
+    };
+
+    void loadHealth();
+
+    return () => {
+      active = false;
+    };
   }, [open]);
 
   useEffect(() => {
@@ -120,7 +136,11 @@ export default function AssistantPanel() {
             <div className="min-w-0 flex-1">
               <p className="font-display text-sm">Expurr — ekspert psów i kotów</p>
               <p className="text-[10px] text-muted-foreground">
-                {health?.ollama ? `Ollama · ${health.model ?? "lokalny model"}` : "Łączę z modelem…"}
+                {health === null
+                    ? "Sprawdzam połączenie…"
+                    : health.ollama
+                      ? `Ollama · ${health.model ?? "lokalny model"}`
+                      : "Model chwilowo niedostępny"}
               </p>
             </div>
           </div>

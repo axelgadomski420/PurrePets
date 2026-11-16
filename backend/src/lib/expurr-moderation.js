@@ -284,6 +284,19 @@ export async function quarantineImage({
  * Analizuje obraz już umieszczony w kwarantannie.
  * Awaria modelu pozostawia plik w kwarantannie.
  */
+/**
+ * Odczytuje manifest konkretnego materiału z prywatnej kwarantanny.
+ * Identyfikator jest walidowany przez manifestPath.
+ */
+export async function getQuarantinedImageRecord({
+  id,
+  quarantineDirectory,
+}) {
+  const directory = path.resolve(quarantineDirectory);
+  const metadataPath = manifestPath(directory, id);
+  return JSON.parse(await fs.readFile(metadataPath, "utf8"));
+}
+
 export async function analyzeQuarantinedImage({
   id,
   quarantineDirectory,

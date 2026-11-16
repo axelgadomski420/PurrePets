@@ -3,7 +3,7 @@ import { Check, CheckCheck, File as FileIcon, Image as ImageIcon, Loader2, Lock,
 import { toast } from "sonner";
 import { Link } from "@tanstack/react-router";
 import { io } from "socket.io-client";
-import { base44, messagesApi } from "@/api/base44Client";
+import { base44, messagesApi, getUploadedFileUrl, getUploadErrorMessage } from "@/api/base44Client";
 import { decryptFrom, encryptFor, ensureE2eKeys } from "@/lib/e2e";
 import { cn } from "@/lib/utils";
 import CallOverlay from "@/components/messaging/CallOverlay";
@@ -199,6 +199,7 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
     setBusy(true);
     try {
       const up = await base44.integrations.Core.UploadPublicFile({ file });
+      const mediaUrl = getUploadedFileUrl(up);
       const media_type = file.type.startsWith("video")
         ? "video"
         : file.type.startsWith("image")
@@ -209,12 +210,12 @@ export default function ChatWindow({ conversationId, peer, onClose }) {
       const res = await messagesApi.send({
         conversation_id: conversationId,
         recipient_id: peerId,
-        media_url: up.file_url,
+        media_url: mediaUrl,
         media_type,
       });
       setMessages((m) => (m.some((x) => x.id === res.message.id) ? m : [...m, { ...res.message, plain: "" }]));
     } catch (err) {
-      toast.error(err?.message ?? "Upload nie powiódł się");
+      toast.error(getUploadErrorMessage(err, "Upload nie powiódł się"));
     } finally {
       setBusy(false);
     }

@@ -27,9 +27,47 @@ if (typeof window !== "undefined") {
 export class ApiError extends Error {
   constructor(status, payload) {
     super(payload?.error?.message || payload?.detail || `Request failed (${status})`);
+    this.name = "ApiError";
     this.status = status;
     this.data = payload;
+    this.code =
+      payload?.code ||
+      payload?.error?.code ||
+      payload?.detail?.code ||
+      null;
   }
+}
+
+export function getUploadedFileUrl(result) {
+  const url = result?.file_url || result?.url;
+
+  if (typeof url !== "string" || !url.trim()) {
+    throw new Error("Serwer nie zwrócił prawidłowego adresu przesłanego pliku.");
+  }
+
+  return url.trim();
+}
+
+export function getUploadErrorMessage(error, fallback = "Upload nie powiódł się") {
+  const code =
+    error?.code ||
+    error?.data?.code ||
+    error?.data?.error?.code ||
+    error?.data?.detail?.code;
+
+  if (code === "MEDIA_PENDING_REVIEW") {
+    return "Materiał oczekuje na zatwierdzenie moderatora. Nie wysyłaj go ponownie.";
+  }
+
+  if (code === "MEDIA_REJECTED") {
+    return "Materiał został odrzucony podczas moderacji i nie został opublikowany.";
+  }
+
+  if (code === "MEDIA_PROCESSING_TIMEOUT") {
+    return "Przetwarzanie materiału trwa zbyt długo. Sprawdź status przed ponownym wysłaniem.";
+  }
+
+  return error?.message || fallback;
 }
 
 function token() {
@@ -236,6 +274,7 @@ export const functions = {
   askAssistant: (data) => request("/api/assistant/ask", { method: "POST", body: data }),
   aiChat: (data) => request("/api/ai/chat", { method: "POST", body: data }),
   aiHealth: () => request("/api/ai/health"),
+  assistantHealth: () => request("/api/assistant/health"),
 };
 
 export const social = {
@@ -465,10 +504,73 @@ export const base44 = {
   entities,
   integrations: {
     Core: {
-      async UploadPublicFile({ file }) {
+            async UploadPublicFile({ file }) {
         const formData = new FormData();
         formData.append("file", file);
-        return request("/api/uploads", { method: "POST", formData });
+
+        const uploaded = await request("/api/uploads", {
+          method: "POST",
+          formData,
+        });
+
+        if (uploaded?.status !== "processing" || !uploaded?.moderation_id) {
+          return uploaded;
+        }
+
+        const moderationId = encodeURIComponent(uploaded.moderation_id);
+        const deadline = Date.now() + 110000;
+
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+
+          const status = await request(
+            `/api/uploads/moderation/${moderationId}`
+          );
+
+          if (
+            status?.status === "published" &&
+            (status.file_url || status.url)
+          ) {
+            return status;
+          }
+
+          if (status?.status === "pending_review") {
+            throw new ApiError(202, {
+              error: {
+                message: status.message || "Zdjęcie oczekuje na ręczną moderację.",
+                code: "MEDIA_PENDING_REVIEW",
+              },
+              moderation_id: moderationId,
+            });
+          }
+
+          if (status?.status === "rejected") {
+            throw new ApiError(422, {
+              error: {
+                message: status.message || "Zdjęcie zostało odrzucone.",
+                code: "MEDIA_REJECTED",
+              },
+              moderation_id: moderationId,
+            });
+          }
+
+          if (status?.status !== "processing") {
+            throw new ApiError(502, {
+              error: {
+                message: "Nieznany status moderacji.",
+                code: "INVALID_MODERATION_STATUS",
+              },
+            });
+          }
+        }
+
+        throw new ApiError(408, {
+          error: {
+            message: "Moderacja nadal trwa. Zdjęcie nie zostało opublikowane.",
+            code: "MEDIA_PROCESSING_TIMEOUT",
+          },
+          moderation_id: moderationId,
+        });
       },
       async UploadPrivateVerificationDocument({ file }) {
         const formData = new FormData();

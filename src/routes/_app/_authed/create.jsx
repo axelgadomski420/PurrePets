@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import TopBar from "@/components/layout/TopBar";
 import { Image } from "@/components/ui/image";
-import { base44 } from "@/api/base44Client";
+import { base44, getUploadedFileUrl, getUploadErrorMessage } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
 import { useI18n } from "@/lib/i18n";
 import { CITY_NAMES } from "@/lib/geo";
@@ -170,8 +170,9 @@ function CreatePage() {
     let uploadedCount = 0;
     try {
       for (const file of files) {
-        const { file_url } = await base44.integrations.Core.UploadPublicFile({ file });
-        if (!file_url) throw new Error("Serwer nie zwrócił adresu przesłanego pliku");
+        const file_url = getUploadedFileUrl(
+          await base44.integrations.Core.UploadPublicFile({ file })
+        );
 
         if (file.type.startsWith("video/")) {
           setVideoUrl(file_url);
@@ -188,7 +189,7 @@ function CreatePage() {
       }
       toast.success(uploadedCount === 1 ? "Plik wgrany" : `Wgrano ${uploadedCount} plików`);
     } catch (error) {
-      toast.error(error?.message ?? "Upload nie powiódł się");
+      toast.error(getUploadErrorMessage(error, "Upload nie powiódł się"));
     } finally {
       setBusy(false);
     }
@@ -320,8 +321,7 @@ function CreatePage() {
             const response = await base44.integrations.Core.UploadPublicFile({
               file: processedFile,
             });
-            const url = response?.file_url || response?.url;
-            if (!url) throw new Error("Nie udało się przesłać przetworzonego zdjęcia.");
+            const url = getUploadedFileUrl(response);
             publishedImageUrls.push(url);
           }
         }
@@ -362,7 +362,7 @@ function CreatePage() {
       toast.success("Profil zwierzaka zapisany");
       navigate({ to: "/profile" });
     } catch (error) {
-      toast.error(error?.message ?? "Nie udalo sie zapisac");
+      toast.error(getUploadErrorMessage(error, "Nie udało się zapisać"));
     } finally {
       setBusy(false);
     }

@@ -7,6 +7,7 @@ import { config } from "../config.js";
 import { requireAuth, isAdmin } from "../lib/auth.js";
 import { asyncHandler, badRequest } from "../lib/errors.js";
 import { savePrivateVerificationDocument } from "../lib/private-verification-documents.js";
+import { startExpurrModerationWorker } from "../lib/expurr-moderation-worker.js";
 
 export const uploadsRouter = Router();
 
@@ -46,6 +47,14 @@ export const uploadRoot = writableDir();
 // Prywatny katalog kwarantanny — poza publicznym /uploads.
 export const privateRoot = path.join(path.dirname(uploadRoot), "purrepets-private");
 const moderationIncoming = path.join(privateRoot, "moderation-incoming");
+
+// Manifesty i obrazy oczekujące na moderację — katalog prywatny.
+const moderationQueueDirectory = path.join(privateRoot, "moderation");
+fs.mkdirSync(moderationQueueDirectory, { recursive: true, mode: 0o700 });
+
+const moderationWorker = startExpurrModerationWorker({
+  quarantineDirectory: moderationQueueDirectory,
+});
 fs.mkdirSync(moderationIncoming, { recursive: true, mode: 0o700 });
 
 // Limity per typ (Moduł 2): zdjęcia 10 MB, wideo 100 MB (Reels), audio 20 MB.
@@ -233,6 +242,144 @@ function findFile(name) {
  * GET/HEAD /api/uploads/file/:name — obsługa HTTP Range (206 Partial Content),
  * dzięki której wideo w Reels i czacie się przewija i streamuje płynnie.
  */
+/**
+ * GET /api/uploads/moderation/:id
+ * Status dostępny wyłącznie właścicielowi przesłanego obrazu.
+ * Publikacja następuje dopiero po pozytywnej decyzji moderacji.
+ */
+uploadsRouter.get(
+  "/moderation/:id",
+  requireAuth,
+  asyncHandler(async (req, res) => {
+    const moderation = await import("../lib/expurr-moderation.js");
+
+    let record;
+
+    try {
+      record = await moderation.getQuarantinedImageRecord({
+        id: req.params.id,
+        quarantineDirectory: moderationQueueDirectory,
+      });
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        return res.status(404).json({
+          error: {
+            message: "Nie znaleziono zadania moderacji.",
+            code: "MODERATION_NOT_FOUND",
+          },
+        });
+      }
+      throw error;
+    }
+
+    // Nie ujawniamy istnienia cudzych zadań moderacji.
+    if (String(record.owner_id) !== String(req.user?.id ?? "")) {
+      return res.status(404).json({
+        error: {
+          message: "Nie znaleziono zadania moderacji.",
+          code: "MODERATION_NOT_FOUND",
+        },
+      });
+    }
+
+    if (record.status === "pending") {
+      return res.json({
+        status: "processing",
+        moderation_id: record.id,
+      });
+    }
+
+    if (record.status === "review") {
+      return res.json({
+        status: "pending_review",
+        moderation_id: record.id,
+        message: "Zdjęcie oczekuje na ręczną decyzję moderatora.",
+      });
+    }
+
+    if (record.status === "block" || record.status === "rejected") {
+      return res.json({
+        status: "rejected",
+        moderation_id: record.id,
+        message: "Zdjęcie nie zostało dopuszczone do publikacji.",
+      });
+    }
+
+    if (record.status === "approved_for_publication") {
+      const published = await moderation.publishQuarantinedImage({
+        id: record.id,
+        quarantineDirectory: moderationQueueDirectory,
+        publicDirectory: uploadRoot,
+      });
+
+      const base = config.publicBaseUrl.replace(/\/$/, "");
+      const url = `${base}/api/uploads/file/${encodeURIComponent(published.file_name)}`;
+
+      return res.json({
+        status: "published",
+        moderation_id: record.id,
+        file_name: published.file_name,
+        file_url: url,
+        url,
+        size: published.size,
+        type: published.mime_type,
+        moderation: "approved",
+      });
+    }
+
+    if (record.status === "published") {
+      const fileName = path.basename(String(record.file_name || ""));
+
+      if (!fileName || fileName !== record.file_name) {
+        return res.status(409).json({
+          error: {
+            message: "Nieprawidłowa nazwa opublikowanego pliku.",
+            code: "INVALID_PUBLISHED_FILE",
+          },
+        });
+      }
+
+      const publicFile = path.join(uploadRoot, fileName);
+
+      try {
+        const stat = fs.lstatSync(publicFile);
+
+        if (!stat.isFile() || stat.isSymbolicLink()) {
+          throw new Error("Plik nie jest zwykłym plikiem.");
+        }
+      } catch {
+        return res.status(404).json({
+          error: {
+            message: "Opublikowany plik nie jest dostępny.",
+            code: "PUBLISHED_FILE_NOT_FOUND",
+          },
+        });
+      }
+
+      const base = config.publicBaseUrl.replace(/\/$/, "");
+      const url = `${base}/api/uploads/file/${encodeURIComponent(fileName)}`;
+
+      return res.json({
+        status: "published",
+        moderation_id: record.id,
+        file_name: fileName,
+        file_url: url,
+        url,
+        size: record.size,
+        type: record.mime_type,
+        moderation: "approved",
+      });
+    }
+
+    return res.status(409).json({
+      error: {
+        message: "Nieznany status zadania moderacji.",
+        code: "UNKNOWN_MODERATION_STATUS",
+      },
+    });
+  })
+);
+
 uploadsRouter.get("/file/:name", (req, res) => {
   const file = findFile(req.params.name);
   if (!file) return res.status(404).json({ error: { message: "File not found", code: "NOT_FOUND" } });
@@ -423,51 +570,13 @@ uploadsRouter.post(
         cleanup();
       }
 
-      const analyzed = await moderation.analyzeQuarantinedImage({
-        id: record.id,
-        quarantineDirectory,
-      });
+      // Analiza odbywa się w tle. Upload nie czeka na odpowiedź Ollamy.
+      moderationWorker.enqueue(record.id);
 
-      if (analyzed.decision === "block") {
-        await moderation.rejectQuarantinedImage({
-          id: record.id,
-          quarantineDirectory,
-          moderatorId: "expurr-auto",
-          reason: analyzed.analysis?.summary || "Jednoznaczne naruszenie zasad.",
-        });
-
-        return res.status(422).json({
-          error: {
-            message: "Materiał został odrzucony przez automatyczną moderację.",
-            code: "MEDIA_REJECTED",
-          },
-          moderation_id: record.id,
-        });
-      }
-
-      if (analyzed.status !== "approved_for_publication") {
-        return res.status(202).json({
-          status: "pending_review",
-          moderation_id: record.id,
-          message: "Zdjęcie oczekuje na decyzję moderatora i nie jest publiczne.",
-        });
-      }
-
-      const published = await moderation.publishQuarantinedImage({
-        id: record.id,
-        quarantineDirectory,
-        publicDirectory: uploadRoot,
-      });
-
-      const base = config.publicBaseUrl.replace(/\/$/, "");
-      const url = `${base}/api/uploads/file/${published.file_name}`;
-
-      return res.status(201).json({
-        file_url: url,
-        url,
-        size: published.size,
-        type: published.mime_type,
-        moderation: "approved",
+      return res.status(202).json({
+        status: "processing",
+        moderation_id: record.id,
+        message: "Zdjęcie zapisano w prywatnej kolejce moderacji.",
       });
     }
 

@@ -191,6 +191,7 @@ export async function extractPrivateVerificationDocument(token, userId) {
 
   try {
     let images = [];
+    let hasMorePages = false;
 
     if (metadata.mimeType === "application/pdf") {
       tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "purre-ocr-"));
@@ -205,7 +206,7 @@ export async function extractPrivateVerificationDocument(token, userId) {
         "-sDEVICE=pnggray",
         "-r180",
         "-dFirstPage=1",
-        "-dLastPage=8",
+        "-dLastPage=9",
         "-dNumRenderingThreads=1",
         `-sOutputFile=${output}`,
         filePath,
@@ -214,10 +215,14 @@ export async function extractPrivateVerificationDocument(token, userId) {
         maxBuffer: 4 * 1024 * 1024,
       });
 
-      const names = (await fs.readdir(tempDir))
+      const allNames = (await fs.readdir(tempDir))
         .filter((name) => /^page-\d{3}\.png$/.test(name))
-        .sort()
-        .slice(0, 8);
+        .sort();
+
+      // Dziewiąta strona wykrywa przekroczenie limitu OCR.
+      // Do rozpoznawania przekazujemy maksymalnie pierwsze 8 stron.
+      hasMorePages = allNames.length > 8;
+      const names = allNames.slice(0, 8);
 
       images = names.map((name) => path.join(tempDir, name));
     } else {
@@ -259,10 +264,15 @@ export async function extractPrivateVerificationDocument(token, userId) {
       text,
       filename: metadata.filename,
       pages_read: images.length,
+      pages_truncated: hasMorePages,
+      pages_total_detected: hasMorePages ? 9 : images.length,
       pages_failed: failedPages,
       languages: "pol+eng",
       ok: text.length >= 20,
-      complete: failedPages.length === 0 && images.length > 0,
+      complete:
+        failedPages.length === 0 &&
+        images.length > 0 &&
+        !hasMorePages,
     };
   } finally {
     if (tempDir) {

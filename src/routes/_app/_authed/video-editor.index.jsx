@@ -4,7 +4,7 @@ import { toast } from "sonner";
 import { Film } from "lucide-react";
 import TopBar from "@/components/layout/TopBar";
 import PurreStudio from "@/components/studio/PurreStudio";
-import { base44, storiesApi } from "@/api/base44Client";
+import { base44, storiesApi, getUploadedFileUrl, getUploadErrorMessage } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
 import { ensureProfile } from "@/lib/useProfile";
 
@@ -32,16 +32,16 @@ function VideoEditorPage() {
     }
     setStage("upload");
     try {
-      const up = await base44.integrations.Core.UploadPublicFile({ file: files[0] });
-      const videoUrl = up?.file_url || up?.url;
-      if (!videoUrl) throw new Error("Serwer nie zwrócił adresu przesłanego pliku");
+      const videoUrl = getUploadedFileUrl(
+        await base44.integrations.Core.UploadPublicFile({ file: files[0] })
+      );
 
       let coverUrl = "";
       if (coverBlob) {
         const upCover = await base44.integrations.Core.UploadPublicFile({
           file: new File([coverBlob], "purre-cover.jpg", { type: "image/jpeg" }),
         });
-        coverUrl = upCover?.file_url || upCover?.url || "";
+        coverUrl = getUploadedFileUrl(upCover);
       }
 
       if (kind === "story") {
@@ -82,7 +82,7 @@ function VideoEditorPage() {
       navigate({ to: "/reels" });
     } catch (error) {
       // Rzucamy dalej — Studio pozostaje otwarte i nie traci projektu.
-      throw error;
+      throw new Error(getUploadErrorMessage(error, "Nie udało się opublikować materiału."), { cause: error });
     } finally {
       setStage("");
     }

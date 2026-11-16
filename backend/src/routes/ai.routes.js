@@ -87,7 +87,7 @@ router.post("/chat", requireAuth, asyncHandler(async (req, res) => {
           pet.color && `Umaszczenie: ${pet.color}`,
           pet.bio && `Opis właściciela: ${String(pet.bio).slice(0, 300)}`,
         ].filter(Boolean).join("; ");
-        petContext = `\\n\\nKontekst zwierzęcia użytkownika (wybrał je sam): ${petContext}.`;
+        petContext = `\n\nKontekst zwierzęcia użytkownika (wybrał je sam): ${petContext}.`;
       }
     } catch {
       // brak kontekstu nie może zabić rozmowy
@@ -129,7 +129,7 @@ ${knowledge || "Brak pasujących materiałów w lokalnej bazie. Nie twórz fikcy
 
 Jeśli wykorzystujesz materiały z bazy, wskaż ich tytuł lub organizację. Materiały są pomocnicze i nie zastępują konsultacji weterynaryjnej.`;
 
-  const result = await ollamaGenerate(history ? `${history}\\nUżytkownik: ${prompt}\\nAsystent:` : prompt, { system, model: "qwen2.5:3b" });
+  const result = await ollamaGenerate(history ? `${history}\nUżytkownik: ${prompt}\nAsystent:` : prompt, { system, model: config.ollamaModel });
   if (!result.ok) {
     console.error("Błąd LLM:", result.error);
     return res.status(503).json({ error: "Model AI jest niedostępny. Spróbuj ponownie za chwilę." });
@@ -267,7 +267,7 @@ router.post("/verify-breeder", requireAuth, isModerator, asyncHandler(async (req
       documentStatus = extracted.ok && extracted.complete === true
         ? `OCR wykonano: ${extracted.languages}, stron: ${extracted.pages_read}`
         : extracted.ok
-          ? `OCR częściowy: ${extracted.languages}, stron: ${extracted.pages_read}, nieodczytane: ${(extracted.pages_failed || []).join(", ") || "nieustalone"}`
+          ? `OCR częściowy: ${extracted.languages}, stron: ${extracted.pages_read}, nieodczytane: ${(extracted.pages_failed || []).join(", ") || "nieustalone"}${extracted.pages_truncated ? ", PDF przekracza limit 8 stron — odczytano tylko pierwsze 8" : ""}`
           : "OCR nie rozpoznał wystarczającej ilości tekstu";
     } catch (error) {
       documentStatus = `Nie udało się odczytać dokumentu: ${String(error?.message || error).slice(0, 250)}`;
@@ -312,7 +312,7 @@ Dane wniosku:
 Odpowiedz WYŁĄCZNIE w formacie JSON:
 {"score": <0-100>, "recommendation": "<approve|reject|manual>", "reasoning": "<2-3 zdania po polsku>", "missing": ["<brakujące elementy>"]}`;
 
-  const result = await ollamaGenerate(prompt, { timeoutMs: 120000, model: "qwen2.5:3b" });
+  const result = await ollamaGenerate(prompt, { timeoutMs: 120000, model: config.ollamaModel });
   let parsed = null;
   if (result.ok) {
     const match = result.text.match(/\{[\s\S]*\}/);

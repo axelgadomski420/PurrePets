@@ -7,7 +7,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { Image } from "@/components/ui/image";
-import { base44, profileApi } from "@/api/base44Client";
+import { base44, profileApi, getUploadedFileUrl, getUploadErrorMessage } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
 import { formatNumber } from "@/lib/format";
 import { openConversation } from "@/lib/conversations";
@@ -281,18 +281,19 @@ export default function ProfileView({ profileId }) {
     if (!file || !userId) return;
     setUploading(field);
     try {
-      const { file_url } = await base44.integrations.Core.UploadPublicFile({ file });
+      const uploadResult = await base44.integrations.Core.UploadPublicFile({ file });
+      const fileUrl = getUploadedFileUrl(uploadResult);
       let payload;
       if (field === "gallery") {
-        payload = { gallery_urls: [...(data.profile.gallery_urls ?? []), file_url].slice(0, 12) };
+        payload = { gallery_urls: [...(data.profile.gallery_urls ?? []), fileUrl].slice(0, 12) };
       } else {
-        payload = { [field]: file_url };
+        payload = { [field]: fileUrl };
       }
       await profileApi.update(payload);
       toast.success(field === "avatar_url" ? "Awatar zaktualizowany" : field === "gallery" ? "Zdjęcie dodane do galerii" : "Tło zaktualizowane");
       await load();
     } catch (err) {
-      toast.error(err?.message ?? "Upload nie powiódł się");
+      toast.error(getUploadErrorMessage(err, "Upload nie powiódł się"));
     } finally {
       setUploading("");
     }

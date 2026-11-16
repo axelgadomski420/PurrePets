@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Send, Wand2, X } from "lucide-react";
 import { toast } from "sonner";
-import { base44, storiesApi } from "@/api/base44Client";
+import { base44, storiesApi, getUploadedFileUrl, getUploadErrorMessage } from "@/api/base44Client";
 import SoundPicker from "@/components/reels/SoundPicker";
 import PurreStudio from "@/components/studio/PurreStudio";
 import { STUDIO_FILTERS } from "@/lib/purre-studio";
@@ -63,10 +63,7 @@ export default function StoryComposer({ onClose, onPublished }) {
     setPublishing(true);
     try {
       const up = await base44.integrations.Core.UploadPublicFile({ file: files[0] });
-      const uploadedUrl = up?.file_url || up?.url;
-      if (typeof uploadedUrl !== "string" || !uploadedUrl.trim()) {
-        throw new Error("Serwer nie zwrócił adresu przesłanego pliku");
-      }
+      const uploadedUrl = getUploadedFileUrl(up);
       // Muzyka: dla wideo jest już ZMIKSOWANA w pliku; tytuł zapisujemy jako metadane.
       const musicTitle = track
         ? track.title + (track.artist ? " — " + track.artist : "")
@@ -87,7 +84,7 @@ export default function StoryComposer({ onClose, onPublished }) {
       onPublished?.();
       onClose?.();
     } catch (err) {
-      toast.error(err?.message ?? "Nie udało się opublikować relacji");
+      toast.error(getUploadErrorMessage(err, "Nie udało się opublikować relacji"));
       throw err; // Studio pozostaje otwarte — użytkownik nie traci projektu
     } finally {
       setPublishing(false);
