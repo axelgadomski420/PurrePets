@@ -50,13 +50,13 @@ export default function PostCard({ post, demo = false }) {
   }, [post.id, demo, user?.id]);
 
   const toggleLike = async () => {
+    if (!isAuthenticated) {
+      navigateToLogin();
+      return;
+    }
     if (demo) {
       setLiked((prev) => !prev);
       setLikeCount((count) => count + (liked ? -1 : 1));
-      return;
-    }
-    if (!isAuthenticated) {
-      navigateToLogin();
       return;
     }
     if (liked) {
@@ -331,25 +331,35 @@ export default function PostCard({ post, demo = false }) {
                 ))}
               </ul>
             )}
-            <div className="mt-2 flex items-center gap-2">
-              <input
-                value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") addComment();
-                }}
-                placeholder={t("feed.addComment")}
-                className="h-9 flex-1 rounded-lg border border-border/60 bg-transparent px-3 text-xs outline-none placeholder:text-muted-foreground/70 focus:border-violet/60"
-              />
+            {isAuthenticated ? (
+              <div className="mt-2 flex items-center gap-2">
+                <input
+                  value={draft}
+                  onChange={(event) => setDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") addComment();
+                  }}
+                  placeholder={t("feed.addComment")}
+                  className="h-9 min-w-0 flex-1 rounded-lg border border-border/60 bg-transparent px-3 text-xs outline-none placeholder:text-muted-foreground/70 focus:border-violet/60"
+                />
+                <button
+                  type="button"
+                  onClick={addComment}
+                  disabled={busy || !draft.trim()}
+                  className="rounded-lg bg-foreground px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-background disabled:opacity-50"
+                >
+                  {t("common.send")}
+                </button>
+              </div>
+            ) : (
               <button
                 type="button"
-                onClick={addComment}
-                disabled={busy || !draft.trim()}
-                className="rounded-lg bg-foreground px-3 py-2 text-[10px] font-semibold uppercase tracking-widest text-background disabled:opacity-50"
+                onClick={navigateToLogin}
+                className="mt-2 w-full rounded-lg border border-border/70 px-3 py-2 text-xs font-medium text-muted-foreground transition hover:text-foreground"
               >
-                {t("common.send")}
+                Zaloguj się, aby dodać komentarz
               </button>
-            </div>
+            )}
           </div>
         )}
       </div>
