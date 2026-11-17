@@ -33,7 +33,7 @@
     "back": "Wróć"
   },
   "feed": {
-    "title": "HoloFeed",
+    "title": "PurreFeed",
     "subtitle": "Najlepsze momenty z polskich hodowli",
     "forYou": "Dla Ciebie",
     "following": "Obserwowani",
@@ -73,7 +73,7 @@
     "pet": "Profil zwierzaka",
     "adoption": "Adopcja",
     "listingHint": "Sprzedaj lub znajdź dom dla szczeniaka / kociaka",
-    "postHint": "Zdjęcie lub wideo do HoloFeed",
+    "postHint": "Zdjęcie lub wideo do PurreFeed",
     "petHint": "Wizytówka pupila z rodowodem",
     "adoptionHint": "Znajdź odpowiedzialny dom",
     "titleField": "Tytuł",

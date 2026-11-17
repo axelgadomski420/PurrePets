@@ -34,7 +34,7 @@ export const Route = createFileRoute("/_app/_authed/create")({
 const CHOICES = [
   {
     id: "post",
-    title: "Post / HoloFeed",
+    title: "Post / PurreFeed",
     hint: "Zdjecie lub krotki tekst w feedzie spolecznosci",
     icon: ImagePlus,
     accent: "from-violet/25 to-aura/10",
@@ -50,7 +50,7 @@ const CHOICES = [
   {
     id: "listing",
     title: "Ogloszenie",
-    hint: "Sprzedaz lub adopcja — tylko zweryfikowany hodowca",
+    hint: "Reproduktor lub adopcja — tylko zweryfikowany hodowca",
     icon: Store,
     accent: "from-chart-4/20 to-violet/10",
     requiresVerified: true,
@@ -601,7 +601,7 @@ function CreatePage() {
                   <>
                     <div className="flex gap-2">
                       {[
-                        { id: "sale", label: "Sprzedaz" },
+                        { id: "sale", label: "Reproduktor" },
                         { id: "adoption", label: "Adopcja" },
                       ].map((k) => (
                         <button

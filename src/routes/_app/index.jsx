@@ -16,11 +16,11 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/_app/")({
   head: () => ({
     meta: [
-      { title: "PURRE PETS — HoloFeed" },
+      { title: "PURRE PETS — PurreFeed" },
       {
         name: "description",
         content:
-          "HoloFeed PURRE PETS — najlepsze momenty z polskich hodowli psów i kotów rasowych.",
+          "PurreFeed PURRE PETS — najlepsze momenty z polskich hodowli psów i kotów rasowych.",
       },
     ],
   }),
@@ -95,7 +95,7 @@ function DiscoverPage() {
           <div className="fade-up">
             <p className="text-[10px] uppercase tracking-[0.4em] text-muted-foreground">purre pets</p>
             <h1 className="mt-2 font-display text-4xl leading-none tracking-tight sm:text-5xl">
-              <span className="aura-text">HoloFeed</span>
+              <span className="aura-text">PurreFeed</span>
             </h1>
             <p className="mt-2 max-w-md text-sm text-muted-foreground">{t("feed.subtitle")}</p>
           </div>
@@ -162,7 +162,7 @@ function DiscoverPage() {
 
           {isDemo && (
             <p className="mb-4 rounded-xl border border-aura/30 bg-aura/5 px-3 py-2 text-[11px] text-muted-foreground">
-              Przykładowe treści — dodaj pierwszy post, aby HoloFeed zaczął żyć Twoją hodowlą.
+              Przykładowe treści — dodaj pierwszy post, aby PurreFeed zaczął żyć Twoją hodowlą.
             </p>
           )}
 

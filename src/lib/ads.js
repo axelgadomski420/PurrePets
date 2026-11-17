@@ -68,10 +68,5 @@ export function isAdsDisabled(wallet) {
     wallet.badges.includes("premium")
   ) return true;
 
-  if (
-    wallet.boost_until &&
-    new Date(wallet.boost_until) > new Date()
-  ) return true;
-
   return false;
 }

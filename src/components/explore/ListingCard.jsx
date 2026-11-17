@@ -29,7 +29,7 @@ export default function ListingCard({ listing, fromCity }) {
           </span>
         )}
         <span className="absolute bottom-2 right-2 rounded-full bg-background/85 px-2.5 py-1 text-[11px] font-semibold backdrop-blur">
-          {listing.kind === "adoption" ? t("explore.adoptions") : formatPrice(listing.price)}
+          {listing.kind === "adoption" ? "Adopcja" : "Reproduktor"} · {formatPrice(listing.price)}
         </span>
       </div>
       <div className="flex flex-1 flex-col gap-1.5 p-3">

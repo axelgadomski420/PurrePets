@@ -28,7 +28,7 @@ export function isPremiumActive(wallet) {
 export const PREMIUM_PERKS = [
   "Brak reklam w feedzie, Explore, Reels i Arcade",
   "Więcej wyróżnień ogłoszeń (boost)",
-  "Priorytet w HoloFeed i Discover",
+  "Priorytet w PurreFeed i Discover",
   "Zaawansowane statystyki dla hodowcy",
   "Nielimitowane zapisane wyszukiwania",
   "Badge PREMIUM przy profilu",

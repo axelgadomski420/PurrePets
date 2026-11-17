@@ -28,7 +28,7 @@ export const config = {
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
   ollamaUrl: process.env.OLLAMA_URL ?? "http://127.0.0.1:11434",
   // Model zgodny z briefem i lib/ai.js — bielik powodował 404/503, gdy OLLAMA_MODEL nie był ustawiony.
-  ollamaModel: process.env.OLLAMA_MODEL ?? "qwen2.5:3b",
+  ollamaModel: process.env.OLLAMA_MODEL ?? "hf.co/Fibogacci/muszka-instruct-1.5b-v1.0-GGUF:Q4_K_M",
   // Bez jawnego ADMIN_EMAILS lista adminów jest pusta — skrypty admina przerywają
   // (spójne z seed-admin.js / make-admin.mjs po rundzie 2). Domyślny e-mail usunięty.
   adminEmails: (process.env.ADMIN_EMAILS ?? "").split(",").map((e) => e.trim().toLowerCase()).filter(Boolean),

@@ -98,8 +98,8 @@ function ExplorePage() {
           <div className="no-scrollbar flex items-center gap-2 overflow-x-auto pb-1">
             {[
               { id: "all", label: t("common.all") },
-              { id: "sale", label: t("explore.listings") },
-              { id: "adoption", label: t("explore.adoptions") },
+              { id: "sale", label: "Reproduktor" },
+              { id: "adoption", label: "Adopcja" },
             ].map((item) => (
               <button
                 key={item.id}

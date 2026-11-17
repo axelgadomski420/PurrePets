@@ -238,7 +238,7 @@ function ListingPage() {
           <div className="rounded-[var(--radius)] border border-border/70 bg-card/70 p-4">
             <div className="flex items-center justify-between">
               <p className="font-display text-2xl">
-                {listing.kind === "adoption" ? t("explore.adoptions") : formatPrice(listing.price)}
+                {listing.kind === "adoption" ? "Adopcja" : "Reproduktor"} · {formatPrice(listing.price)}
               </p>
               {boosted && (
                 <span className="flex items-center gap-1 rounded-full bg-aura/15 px-2 py-1 text-[9px] uppercase tracking-widest text-aura">

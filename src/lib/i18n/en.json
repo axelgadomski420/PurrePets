@@ -33,7 +33,7 @@
     "back": "Back"
   },
   "feed": {
-    "title": "HoloFeed",
+    "title": "PurreFeed",
     "subtitle": "The finest moments from breeders",
     "forYou": "For you",
     "following": "Following",
@@ -73,7 +73,7 @@
     "pet": "Pet profile",
     "adoption": "Adoption",
     "listingHint": "Sell or find a home for a puppy / kitten",
-    "postHint": "Photo or video for HoloFeed",
+    "postHint": "Photo or video for PurreFeed",
     "petHint": "A pedigree profile for your pet",
     "adoptionHint": "Find a responsible home",
     "titleField": "Title",

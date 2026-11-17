@@ -576,6 +576,10 @@ router.post("/chat", requireAuth, asyncHandler(async (req, res) => {
 
 ODPOWIADAJ:
 - Zawsze odpowiadaj po polsku, naturalnie, jasno i praktycznie.
+- KAŻDA odpowiedź musi zawierać maksymalnie 3 pełne zdania.
+- Pisz zwięźle, bez rozbudowanych wstępów, nagłówków i długich list.
+- Wybieraj najważniejsze informacje; przy zagrożeniu zdrowia priorytetem jest pilne zalecenie kontaktu z weterynarzem.
+- Nie skracaj odpowiedzi kosztem ważnych ostrzeżeń dotyczących bezpieczeństwa.
 - Najpierw odpowiedz bezpośrednio na pytanie, potem wyjaśnij dlaczego i podaj konkretne następne kroki.
 - Rozróżniaj psy i koty; uwzględniaj gatunek, wiek, rasę i kontekst wybranego zwierzęcia.
 - Nie powtarzaj bez potrzeby informacji, które użytkownik już podał w historii rozmowy.
@@ -618,8 +622,8 @@ Odpowiedź powinna być kompletna, ale nie rozwlekła. Przy złożonym pytaniu z
     {
       system,
       model: config.ollamaModel,
-      timeoutMs: 120000,
-      numPredict: 1100,
+      timeoutMs: 180000,
+      numPredict: 120,
     }
   );
   if (!result.ok) {

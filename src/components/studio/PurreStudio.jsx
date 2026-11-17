@@ -119,7 +119,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
   const [recording, setRecording] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [quality, setQuality] = useState(mode === "reel" ? "sd" : "hd");
+  const [quality, setQuality] = useState(mode === "reel" || mode === "story" ? "sd" : "hd");
   const [draftOffer, setDraftOffer] = useState(null);
   const past = useRef([]);
   const future = useRef([]);
@@ -754,7 +754,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
           <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[1.75rem] border border-white/[0.09] bg-[radial-gradient(ellipse_at_center,_#24202e_0%,_#111018_48%,_#08090d_100%)] shadow-[0_24px_90px_-35px_rgba(0,0,0,0.9)] ring-1 ring-white/[0.04]">
             {isVideo ? (
-              <VideoPreview items={items} activeId={active?.id} videoRefs={videoRefs} textLayers={textLayers} stickers={stickers} audio={audio} selectedLayerId={selectedLayerId} />
+              <VideoPreview items={items} activeId={active?.id} videoRefs={videoRefs} textLayers={textLayers} stickers={stickers} audio={audio} selectedLayerId={selectedLayerId} onPreviewPointerDown={onPreviewPointerDown} onPreviewPointerMove={onPreviewPointerMove} onPreviewPointerUp={onPreviewPointerUp} onPreviewWheel={onPreviewWheel} />
             ) : active ? (
               <canvas
                 ref={previewCanvasRef}
@@ -1019,13 +1019,13 @@ function Slider({ label, min, max, step = 1, value, onChange, onCommit }) {
 }
 
 /** Podgląd wideo: aktywny klip z filtrami CSS i warstwami HTML (drag na warstwach). */
-function VideoPreview({ items, activeId, videoRefs, textLayers, stickers, audio, selectedLayerId }) {
+function VideoPreview({ items, activeId, videoRefs, textLayers, stickers, audio, selectedLayerId, onPreviewPointerDown, onPreviewPointerMove, onPreviewPointerUp, onPreviewWheel }) {
   const videos = items.filter((item) => item.type === "video");
   const first = videos.find((item) => item.id === activeId) ?? videos[0];
 
   return (
-    <div className="relative flex h-full max-h-full items-center justify-center">
-      <div className="relative aspect-[9/16] max-h-full overflow-hidden rounded-2xl bg-black">
+    <div className="relative flex h-full max-h-full items-center justify-center" onPointerDown={onPreviewPointerDown} onPointerMove={onPreviewPointerMove} onPointerUp={onPreviewPointerUp} onPointerCancel={onPreviewPointerUp} onWheel={onPreviewWheel}>
+      <div className="relative aspect-[9/16] max-h-full overflow-hidden rounded-2xl bg-black touch-none select-none">
         {first ? (
           <video
             ref={(el) => { if (el) videoRefs.current.set(first.id, el); }}

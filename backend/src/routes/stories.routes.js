@@ -19,8 +19,8 @@ function normalizeFilter(value) {
 const createSchema = z.object({
   media_url: z.string().trim().min(4).max(500),
   media_type: z.enum(["image", "video"]).default("image"),
-  caption: z.string().trim().max(300).optional(),
-  music_title: z.string().trim().max(120).optional(),
+  caption: z.string().trim().max(300).nullable().optional(),
+  music_title: z.string().trim().max(120).nullable().optional(),
   music_url: z.string().trim().max(500).nullable().optional(),
   // Katalog filtrów = STUDIO_FILTERS z src/lib/purre-studio.js (frontend).
   // Nieznane presety są bezpiecznie normalizowane do null — zero 400 przy nowych presetach.

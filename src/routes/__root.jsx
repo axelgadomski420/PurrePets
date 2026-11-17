@@ -19,13 +19,13 @@ export const Route = createRootRoute({
       { property: "og:type", content: "website" },
       { property: "og:url", content: "https://purrepets.pl" },
       { property: "og:title", content: "PURRE PETS — premium social marketplace dla hodowców" },
-      { property: "og:description", content: "HoloFeed, Reels, PURRE Messenger i marketplace dla hodowców psów i kotów rasowych." },
+      { property: "og:description", content: "PurreFeed, Reels, PURRE Messenger i marketplace dla hodowców psów i kotów rasowych." },
       { property: "og:locale", content: "pl_PL" },
       { title: "PURRE PETS — premium social marketplace dla hodowców" },
       {
         name: "description",
         content:
-          "PURRE PETS — elegancki social marketplace dla hodowców psów i kotów rasowych: HoloFeed, marketplace z lokalizacją, PURRE Messenger, adopcje, Smart Match i PURRE Arcade.",
+          "PURRE PETS — elegancki social marketplace dla hodowców psów i kotów rasowych: PurreFeed, marketplace z lokalizacją, PURRE Messenger, adopcje, Smart Match i PURRE Arcade.",
       },
     ],
     links: [
