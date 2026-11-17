@@ -771,6 +771,26 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], im
                 Dodaj zdjęcia lub wideo<br />(Studio wspiera wiele plików)
               </button>
             )}
+            <div className="absolute right-2 top-1/2 z-20 flex max-h-[78%] -translate-y-1/2 flex-col gap-2 overflow-y-auto overscroll-contain rounded-2xl border border-white/15 bg-[#100e18]/80 p-1.5 shadow-xl shadow-black/40 backdrop-blur-xl">
+              {TABS.map(({ id, label, Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setTab(id)}
+                  title={label}
+                  aria-label={label}
+                  aria-pressed={tab === id}
+                  className={cn(
+                    "grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition-all",
+                    tab === id
+                      ? "border-fuchsia-400/50 bg-gradient-to-br from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/25"
+                      : "border-transparent bg-white/[0.04] text-white/65 hover:border-white/20 hover:bg-white/10 hover:text-white"
+                  )}
+                >
+                  <Icon className="h-[18px] w-[18px]" />
+                </button>
+              ))}
+            </div>
           </div>
           <div className="no-scrollbar flex shrink-0 items-center gap-2 overflow-x-auto rounded-2xl border border-violet-200/[0.12] bg-[#100e18]/95 p-2 shadow-[0_16px_45px_-24px_rgba(0,0,0,0.95)] backdrop-blur-xl">
             {items.map((item, index) => (
@@ -794,14 +814,6 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], im
         </div>
 
         <div className="no-scrollbar flex max-h-[min(38dvh,22rem)] min-h-0 w-full shrink-0 flex-col overflow-y-auto overscroll-contain rounded-[1.35rem] border border-violet-200/[0.14] bg-[linear-gradient(145deg,rgba(28,23,42,0.97),rgba(13,12,20,0.98))] p-3 shadow-[0_20px_70px_-30px_rgba(0,0,0,0.9)] backdrop-blur-2xl sm:max-h-[min(42dvh,28rem)] sm:p-4 lg:max-h-none lg:w-[22rem] lg:rounded-[1.75rem] lg:p-5">
-          <div className="no-scrollbar flex shrink-0 gap-1.5 overflow-x-auto border-b border-violet-200/[0.12] pb-3">
-            {TABS.map(({ id, label, Icon }) => (
-              <button key={id} type="button" onClick={() => setTab(id)} className={cn("flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-[9px] font-bold uppercase tracking-wider transition-all duration-200", tab === id ? "border-fuchsia-400/40 bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/20" : "border-white/[0.07] bg-white/[0.035] text-white/55 hover:border-white/20 hover:bg-white/[0.08] hover:text-white")}>
-                <Icon className="h-3 w-3" /> {label}
-              </button>
-            ))}
-          </div>
-
           <div className="mt-4 min-h-0 space-y-4 overflow-y-auto overscroll-contain px-0.5 pb-2 text-white [&_input:not([type=range]):not([type=color]):not([type=checkbox])]:outline-none [&_input:not([type=range]):not([type=color]):not([type=checkbox])]:focus:border-fuchsia-400/60 [&_button]:transition-all [&_button]:duration-200">
             {tab === "edit" && active && (
               <>
