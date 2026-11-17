@@ -85,12 +85,22 @@ premiumRouter.get(
     });
     const session = await response.json();
     if (!response.ok || session.payment_status !== "paid") throw badRequest("Płatność nie została potwierdzona");
+    const sessionUserId = session?.metadata?.user_id || session?.client_reference_id;
+    if (sessionUserId !== req.user.id) throw badRequest("Sesja należy do innego konta");
+    if (session?.metadata?.kind !== "premium_subscription" || session?.mode !== "subscription") {
+      throw badRequest("To nie jest sesja Purre Pets PRO");
+    }
     const plan = session?.metadata?.plan === "year" ? "year" : "month";
     const periodEnd = new Date(Date.now() + (plan === "year" ? 365 : 30) * 24 * 60 * 60 * 1000);
-    await prisma.subscription.upsert({
-      where: { stripe_session_id: sessionId },
-      update: { status: "active", current_period_end: periodEnd },
-      create: {
+    const existing = await prisma.subscription.findUnique({ where: { stripe_session_id: sessionId } });
+    if (existing) {
+      if (existing.user_id !== req.user.id) throw badRequest("Sesja należy do innego konta");
+      const currentUser = await prisma.user.findUnique({ where: { id: req.user.id } });
+      res.json(serialize(currentUser));
+      return;
+    }
+    await prisma.subscription.create({
+      data: {
         user_id: req.user.id,
         stripe_session_id: sessionId,
         stripe_subscription_id: session.subscription ?? null,
@@ -106,7 +116,6 @@ premiumRouter.get(
       where: { id: req.user.id },
       data: { is_premium: true, premium_until: periodEnd },
     });
-    await prisma.profile.updateMany({ where: { user_id: req.user.id }, data: { verified: true } });
     res.json(serialize(updated));
   })
 );

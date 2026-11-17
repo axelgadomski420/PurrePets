@@ -12,6 +12,7 @@ import { REWARDS } from "@/lib/rewards";
 import { redeemReward } from "@/lib/server-fns";
 import { formatNumber } from "@/lib/format";
 import CoinShop from "@/components/rewards/CoinShop";
+import PremiumShop from "@/components/rewards/PremiumShop";
 
 export const Route = createFileRoute("/_app/rewards")({
   ssr: false,
@@ -98,6 +99,7 @@ function RewardsPage() {
           </span>
         </div>
 
+        <PremiumShop />
         <CoinShop />
 
         {listings.length > 0 && (

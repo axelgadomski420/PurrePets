@@ -1,5 +1,6 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
+import { randomBytes } from "node:crypto";
 import { prisma } from "../prisma.js";
 import { signToken, verifyToken } from "../lib/auth.js";
 
@@ -145,6 +146,114 @@ const handleLogin = async (req, res) => {
     return res.status(500).json({ error: { message: "Błąd serwera. Spróbuj ponownie.", code: "SERVER" } });
   }
 };
+
+
+// Google OAuth - lokalna integracja z kontami PURRE PETS.
+const googleOAuthStates = new Map();
+function safeGoogleReturn(value) {
+  const base = "https://purrepets.pl/";
+  try {
+    const target = new URL(value || "/", base);
+    if (target.origin !== "https://purrepets.pl") return new URL(base);
+    return target;
+  } catch {
+    return new URL(base);
+  }
+}
+authRouter.get("/google", (req, res) => {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const redirectUri = process.env.GOOGLE_CALLBACK_URL;
+  if (!clientId || !process.env.GOOGLE_CLIENT_SECRET || !redirectUri) {
+    return res.status(503).send("Logowanie Google nie jest skonfigurowane.");
+  }
+  const state = randomBytes(32).toString("hex");
+  const returnTo = safeGoogleReturn(req.query.returnTo || req.query.from_url).href;
+  googleOAuthStates.set(state, { returnTo, expiresAt: Date.now() + 10 * 60 * 1000 });
+  for (const [key, value] of googleOAuthStates) {
+    if (value.expiresAt < Date.now()) googleOAuthStates.delete(key);
+  }
+  const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  url.search = new URLSearchParams({
+    client_id: clientId,
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: "openid email profile",
+    state,
+    prompt: "select_account"
+  });
+  return res.redirect(302, url.href);
+});
+authRouter.get("/google/callback", async (req, res) => {
+  let returnTo = new URL("https://purrepets.pl/");
+  try {
+    const state = String(req.query.state || "");
+    const saved = googleOAuthStates.get(state);
+    googleOAuthStates.delete(state);
+    if (!saved || saved.expiresAt < Date.now()) throw new Error("Invalid or expired OAuth state");
+    returnTo = safeGoogleReturn(saved.returnTo);
+    if (req.query.error || !req.query.code) throw new Error("Google authorization failed");
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        code: String(req.query.code),
+        client_id: process.env.GOOGLE_CLIENT_ID || "",
+        client_secret: process.env.GOOGLE_CLIENT_SECRET || "",
+        redirect_uri: process.env.GOOGLE_CALLBACK_URL || "",
+        grant_type: "authorization_code"
+      }),
+      signal: AbortSignal.timeout(15000)
+    });
+    if (!tokenResponse.ok) throw new Error("Google token exchange failed");
+    const googleTokens = await tokenResponse.json();
+    if (!googleTokens.access_token) throw new Error("Google access token missing");
+    const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+      headers: { Authorization: "Bearer " + googleTokens.access_token },
+      signal: AbortSignal.timeout(15000)
+    });
+    if (!profileResponse.ok) throw new Error("Google profile verification failed");
+    const profile = await profileResponse.json();
+    const email = normalizeEmail(profile.email);
+    if (profile.email_verified !== true || !EMAIL_RE.test(email) || !profile.sub) {
+      throw new Error("Google email is not verified");
+    }
+    let user = await prisma.user.findUnique({ where: { email } });
+    if (user) {
+      if (user.banned) return res.status(403).send("To konto PURRE PETS jest zablokowane.");
+      if (!user.email_verified) {
+        user = await prisma.user.update({ where: { id: user.id }, data: { email_verified: true } });
+      }
+    } else {
+      const password_hash = await bcrypt.hash(randomBytes(48).toString("hex"), 10);
+      try {
+        user = await prisma.user.create({
+          data: {
+            email,
+            password_hash,
+            full_name: String(profile.name || profile.given_name || email.split("@")[0]).slice(0, 120),
+            email_verified: true
+          }
+        });
+      } catch (err) {
+        if (err?.code !== "P2002") throw err;
+        user = await prisma.user.findUnique({ where: { email } });
+      }
+      if (!user || user.banned) throw new Error("Account creation conflict");
+    }
+    let appProfile = await prisma.profile.findFirst({ where: { user_id: user.id } });
+    if (!appProfile) {
+      appProfile = await prisma.profile.create({ data: { user_id: user.id, display_name: user.full_name || user.email.split("@")[0], account_type: "enthusiast", created_by_id: user.id } });
+    }
+    await prisma.wallet.upsert({ where: { user_id: user.id }, update: {}, create: { user_id: user.id } });
+    const token = signToken(user);
+    returnTo.searchParams.set("google_token", token);
+    return res.redirect(302, returnTo.href);
+  } catch (err) {
+    console.error("Google OAuth callback error:", err?.message);
+    returnTo.searchParams.set("google_error", "login_failed");
+    return res.redirect(302, returnTo.href);
+  }
+});
 
 authRouter.post("/register", handleRegister);
 authRouter.post("/verify-otp", handleRegister);

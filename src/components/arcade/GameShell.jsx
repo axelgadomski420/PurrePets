@@ -30,6 +30,14 @@ export default function GameShell({ title, score, meta, onRestart, result, submi
         </div>
       </div>
 
+      {!finished && !submitting && (
+        <AdSenseUnit
+          slotName="arcade"
+          format="auto"
+          className="my-3 w-full"
+        />
+      )}
+
       <div className="relative mt-4">
         {children}
 
@@ -76,7 +84,7 @@ export default function GameShell({ title, score, meta, onRestart, result, submi
         )}
       </div>
 
-      {result && !result.guest && !submitting && (
+      {result && !submitting && (
         <AdSenseUnit
           slotName="arcade"
           format="auto"

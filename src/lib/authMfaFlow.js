@@ -107,6 +107,12 @@ export async function loadSignInOptions() {
 // provider: 'google' | 'microsoft' | 'facebook' | 'apple' | 'sso'. With manage, the sign-in opens
 // factor management. Returns to this app's /mfa page when MFA is needed.
 export async function signInWithProvider(provider, returnTo, { manage = false } = {}) {
+  if (provider === 'google' && !manage) {
+    const target = new URL('/api/auth/google', window.location.origin);
+    target.searchParams.set('returnTo', returnTo ?? window.location.href);
+    window.location.assign(target.href);
+    return;
+  }
   const info = await loadSignInOptions();
   // Enterprise SSO sign-in is exempt from Base44 MFA; only managing factors asks for it.
   if (!manage && (info.auth_config?.mfa_policy !== 'required' || provider === 'sso')) {

@@ -183,6 +183,7 @@ export default function StoryComposer({ onClose, onPublished }) {
       <PurreStudio
         open={studioOpen && !!file}
         mode="story"
+        imageFormat="square"
         initialFiles={file ? [file] : []}
         publishLabel="Publikuj relację"
         onClose={() => setStudioOpen(false)}

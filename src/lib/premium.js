@@ -15,14 +15,11 @@ export const PREMIUM_PLANS = [
 ];
 
 export function isPremiumActive(wallet) {
-  if (!wallet) return false;
-  if (Array.isArray(wallet.badges) && wallet.badges.includes("premium")) {
-    if (wallet.boost_until) {
-      return new Date(wallet.boost_until) > new Date();
-    }
-    return true;
-  }
-  return false;
+  return Boolean(
+    wallet &&
+    Array.isArray(wallet.badges) &&
+    wallet.badges.includes("premium")
+  );
 }
 
 export const PREMIUM_PERKS = [

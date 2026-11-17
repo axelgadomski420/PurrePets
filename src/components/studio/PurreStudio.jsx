@@ -56,7 +56,7 @@ function formatForMode(mode) {
  * Undo/redo, reset, autosave projektu + przywracanie wersji roboczej.
  * Publikacja zwraca WYEXPORTOWANE pliki (efekty wypalone), nigdy oryginały.
  */
-export default function PurreStudio({ open, mode = "free", initialFiles = [], onClose, onPublish, publishLabel = "Publikuj" }) {
+export default function PurreStudio({ open, mode = "free", initialFiles = [], imageFormat = null, onClose, onPublish, publishLabel = "Publikuj" }) {
   const [items, setItems] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [tab, setTab] = useState("edit");
@@ -119,7 +119,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
   const [recording, setRecording] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [progress, setProgress] = useState(0);
-  const [quality, setQuality] = useState(mode === "reel" || mode === "story" ? "sd" : "hd");
+  const [quality, setQuality] = useState("sd");
   const [draftOffer, setDraftOffer] = useState(null);
   const past = useRef([]);
   const future = useRef([]);
@@ -131,7 +131,8 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
   const dragRef = useRef(null);
 
   const active = items.find((item) => item.id === activeId) ?? items[0] ?? null;
-  const isVideo = items.some((item) => item.type === "video");
+  const hasVideo = items.some((item) => item.type === "video");
+  const activeIsVideo = active?.type === "video";
   const defaultFormat = formatForMode(mode);
 
   // ---------- Historia (undo/redo) ----------
@@ -222,7 +223,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
           id: "m" + Date.now() + Math.random().toString(36).slice(2, 7),
           type: kind.type, file, url: URL.createObjectURL(file),
           duration: 0, trimStart: 0, trimEnd: 0, speed: 1,
-          ...emptyEdit(), format: defaultFormat,
+          ...emptyEdit(), format: kind.type === "image" && imageFormat ? imageFormat : defaultFormat,
         });
       } catch (err) {
         toast.error(err?.message ?? "Nieobsługiwany plik");
@@ -232,7 +233,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
     pushHistory();
     setItems((prev) => [...prev, ...next]);
     setActiveId((prevActive) => prevActive ?? next[0].id);
-  }, [defaultFormat, pushHistory]);
+  }, [defaultFormat, imageFormat, pushHistory]);
 
   useEffect(() => {
     if (open && initialFiles.length && !items.length) addFiles(initialFiles);
@@ -268,7 +269,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
 
   // Podgląd zdjęć (canvas + silnik)
   useEffect(() => {
-    if (isVideo || !active || active.type !== "image" || !previewCanvasRef.current) return;
+    if (activeIsVideo || !active || active.type !== "image" || !previewCanvasRef.current) return;
     const image = new Image();
     image.onload = () => {
       try {
@@ -283,7 +284,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
       } catch { /* klatka dojdzie */ }
     };
     image.src = active.url;
-  }, [active, textLayers, stickers, isVideo, defaultFormat]);
+  }, [active, textLayers, stickers, activeIsVideo, defaultFormat]);
 
   const updateActive = (patchData, history = true) => {
     if (!active) return;
@@ -665,7 +666,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
     setProgress(0);
     cancelRef.current = false;
     try {
-      if (isVideo || audio.music?.element || audio.voice?.element) {
+      if (hasVideo || audio.music?.element || audio.voice?.element) {
         const clips = await buildVideoExport();
         const { width, height } = exportDims();
         const result = await exportStudioVideo({
@@ -730,9 +731,9 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
   if (!open) return null;
 
   return (
-    <div className="purre-studio fixed inset-0 z-[70] flex h-[100dvh] flex-col overflow-hidden bg-[#08090d] text-white backdrop-blur-xl">
-      <header className="relative z-20 flex shrink-0 items-center gap-3 border-b border-white/[0.08] bg-[#0c0c12]/95 px-4 py-3 shadow-2xl shadow-black/20 sm:px-6">
-        <p className="font-display bg-gradient-to-r from-white via-white to-fuchsia-300 bg-clip-text text-sm font-black tracking-[0.2em] text-transparent sm:text-base">PURRE PETS STUDIO</p>
+    <div className="purre-studio fixed inset-0 z-[70] isolate flex h-[100dvh] flex-col overflow-hidden overscroll-none bg-[radial-gradient(ellipse_at_top,_rgba(124,58,237,0.16),_transparent_42%),linear-gradient(180deg,#0b0a12_0%,#07070b_100%)] text-white backdrop-blur-xl">
+      <header className="relative z-20 flex shrink-0 items-center gap-3 border-b border-violet-300/10 bg-[#0d0b16]/90 px-3 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] shadow-2xl shadow-black/20 sm:px-6">
+        <p className="font-display bg-gradient-to-r from-white via-white to-fuchsia-300 bg-clip-text text-sm font-black tracking-[0.16em] drop-shadow-[0_0_18px_rgba(192,132,252,0.2)] text-transparent sm:text-base">PURRE PETS STUDIO PRO</p>
         <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] uppercase tracking-widest text-white/70">{fmtLabel}</span>
         <div className="ml-auto flex items-center gap-1.5">
           <button type="button" onClick={undo} disabled={!past.current.length} className="grid h-8 w-8 place-items-center rounded-lg bg-white/10 text-white disabled:opacity-40" aria-label="Cofnij"><Undo2 className="h-4 w-4" /></button>
@@ -750,16 +751,16 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
         </div>
       )}
 
-      <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-hidden p-3 sm:p-4 lg:flex-row lg:gap-5 lg:p-5">
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-3">
-          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[1.75rem] border border-white/[0.09] bg-[radial-gradient(ellipse_at_center,_#24202e_0%,_#111018_48%,_#08090d_100%)] shadow-[0_24px_90px_-35px_rgba(0,0,0,0.9)] ring-1 ring-white/[0.04]">
-            {isVideo ? (
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-hidden px-2 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2 sm:gap-4 sm:p-4 lg:flex-row lg:gap-5 lg:p-5">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2 sm:gap-3">
+          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-[1.75rem] border border-violet-300/[0.16] bg-[radial-gradient(ellipse_at_center,_#292238_0%,_#15121e_48%,_#09090e_100%)] shadow-[0_24px_90px_-35px_rgba(0,0,0,0.9)] ring-1 ring-white/[0.04]">
+            {activeIsVideo ? (
               <VideoPreview items={items} activeId={active?.id} videoRefs={videoRefs} textLayers={textLayers} stickers={stickers} audio={audio} selectedLayerId={selectedLayerId} onPreviewPointerDown={onPreviewPointerDown} onPreviewPointerMove={onPreviewPointerMove} onPreviewPointerUp={onPreviewPointerUp} onPreviewWheel={onPreviewWheel} />
             ) : active ? (
               <canvas
                 ref={previewCanvasRef}
                 width={dims.width} height={dims.height}
-                className="max-h-full max-w-full touch-none"
+                className="h-auto max-h-full w-auto max-w-full touch-none object-contain"
                 onPointerDown={onPreviewPointerDown}
                 onPointerMove={onPreviewPointerMove}
                 onPointerUp={onPreviewPointerUp}
@@ -771,7 +772,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
               </button>
             )}
           </div>
-          <div className="no-scrollbar flex shrink-0 items-center gap-2 overflow-x-auto rounded-2xl border border-white/[0.07] bg-[#111118]/90 p-2 pb-2 shadow-xl">
+          <div className="no-scrollbar flex shrink-0 items-center gap-2 overflow-x-auto rounded-2xl border border-violet-200/[0.12] bg-[#100e18]/95 p-2 shadow-[0_16px_45px_-24px_rgba(0,0,0,0.95)] backdrop-blur-xl">
             {items.map((item, index) => (
               <button key={item.id} type="button" onClick={() => setActiveId(item.id)} className={cn("relative h-[4.25rem] w-[3.1rem] shrink-0 overflow-hidden rounded-xl border-2 transition-all duration-200", item.id === active?.id ? "border-fuchsia-400 shadow-[0_0_18px_rgba(217,70,239,0.25)]" : "border-white/10 opacity-70 hover:opacity-100")}>
                 {item.thumb ? <img src={item.thumb} alt="" className="h-full w-full object-cover" /> : <span className="grid h-full w-full place-items-center text-white/60">{item.type === "video" ? <Film className="h-4 w-4" /> : <ImageIcon className="h-4 w-4" />}</span>}
@@ -792,8 +793,8 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
           </div>
         </div>
 
-        <div className="no-scrollbar flex max-h-[43dvh] w-full shrink-0 flex-col overflow-y-auto rounded-[1.5rem] border border-white/[0.09] bg-[#12121a]/95 p-3 shadow-[0_20px_70px_-30px_rgba(0,0,0,0.9)] backdrop-blur-2xl sm:p-4 lg:max-h-none lg:w-[22rem] lg:rounded-[1.75rem] lg:p-5">
-          <div className="no-scrollbar flex shrink-0 gap-1.5 overflow-x-auto border-b border-white/[0.08] pb-3">
+        <div className="no-scrollbar flex max-h-[min(38dvh,22rem)] min-h-0 w-full shrink-0 flex-col overflow-y-auto overscroll-contain rounded-[1.35rem] border border-violet-200/[0.14] bg-[linear-gradient(145deg,rgba(28,23,42,0.97),rgba(13,12,20,0.98))] p-3 shadow-[0_20px_70px_-30px_rgba(0,0,0,0.9)] backdrop-blur-2xl sm:max-h-[min(42dvh,28rem)] sm:p-4 lg:max-h-none lg:w-[22rem] lg:rounded-[1.75rem] lg:p-5">
+          <div className="no-scrollbar flex shrink-0 gap-1.5 overflow-x-auto border-b border-violet-200/[0.12] pb-3">
             {TABS.map(({ id, label, Icon }) => (
               <button key={id} type="button" onClick={() => setTab(id)} className={cn("flex shrink-0 items-center gap-1.5 rounded-xl border px-3 py-2 text-[9px] font-bold uppercase tracking-wider transition-all duration-200", tab === id ? "border-fuchsia-400/40 bg-gradient-to-r from-violet-500 to-fuchsia-500 text-white shadow-lg shadow-fuchsia-500/20" : "border-white/[0.07] bg-white/[0.035] text-white/55 hover:border-white/20 hover:bg-white/[0.08] hover:text-white")}>
                 <Icon className="h-3 w-3" /> {label}
@@ -801,7 +802,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
             ))}
           </div>
 
-          <div className="mt-4 min-h-0 space-y-4 px-0.5 pb-2 text-white [&_input:not([type=range]):not([type=color]):not([type=checkbox])]:outline-none [&_input:not([type=range]):not([type=color]):not([type=checkbox])]:focus:border-fuchsia-400/60 [&_button]:transition-all [&_button]:duration-200">
+          <div className="mt-4 min-h-0 space-y-4 overflow-y-auto overscroll-contain px-0.5 pb-2 text-white [&_input:not([type=range]):not([type=color]):not([type=checkbox])]:outline-none [&_input:not([type=range]):not([type=color]):not([type=checkbox])]:focus:border-fuchsia-400/60 [&_button]:transition-all [&_button]:duration-200">
             {tab === "edit" && active && (
               <>
                 {active.type === "image" && (
@@ -956,7 +957,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], on
               <>
                 {mode !== "reel" && (
                   <div className="flex gap-1.5">
-                    {[{ id: "hd", label: "Wysoka (1080p)" }, { id: "sd", label: "Standard (720p)" }].map((q) => (
+                    {[{ id: "sd", label: "Standard (720p)" }].map((q) => (
                       <button key={q.id} type="button" onClick={() => setQuality(q.id)} className={cn("flex-1 rounded-lg border py-2 text-[10px]", quality === q.id ? "border-aura text-aura" : "border-white/15 text-white/70")}>{q.label}</button>
                     ))}
                   </div>
@@ -1035,7 +1036,7 @@ function VideoPreview({ items, activeId, videoRefs, textLayers, stickers, audio,
             muted
             playsInline
             className="h-full w-full object-cover"
-            style={{ filter: STUDIO_FILTERS.find((f) => f.id === first.filter)?.css ?? "none" }}
+            style={{ filter: [STUDIO_FILTERS.find((f) => f.id === first.filter)?.css, `brightness(${first.brightness ?? 100}%)`, `contrast(${first.contrast ?? 100}%)`, `saturate(${first.saturation ?? 100}%)`, first.temperature ? `hue-rotate(${first.temperature * 0.18}deg)` : "", first.blur ? `blur(${first.blur}px)` : ""].filter(Boolean).join(" ") }}
           />
         ) : null}
         {textLayers.map((layer) => (

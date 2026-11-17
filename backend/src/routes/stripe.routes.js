@@ -207,7 +207,6 @@ async function activatePro(session) {
     data: { is_premium: true, premium_until: periodEnd },
   });
   // Badge PRO / zweryfikowany na profilu.
-  await prisma.profile.updateMany({ where: { user_id: userId }, data: { verified: true } });
   await notify(userId, {
     type: "system",
     title: "Purre Pets PRO aktywne 🏆",
@@ -238,14 +237,26 @@ async function handleSubscriptionDeleted(subscription) {
   const sub = await prisma.subscription.findFirst({ where: { stripe_subscription_id: subId } });
   if (!sub) return null;
   await prisma.subscription.update({ where: { id: sub.id }, data: { status: "canceled" } });
-  await prisma.user.update({ where: { id: sub.user_id }, data: { is_premium: false } });
-  await prisma.profile.updateMany({ where: { user_id: sub.user_id }, data: { verified: false } });
-  await notify(sub.user_id, {
-    type: "system",
-    title: "Subskrypcja PRO wygasła",
-    body: "Twoja subskrypcja Purre Pets PRO została zakończona. Odnów ją w sekcji Premium.",
-    link: "/rewards",
+  const activeSubs = await prisma.subscription.findMany({
+    where: { user_id: sub.user_id, status: "active", current_period_end: { gt: new Date() } },
+    orderBy: { current_period_end: "desc" },
   });
+  const anotherActive = activeSubs.find((item) => item.stripe_subscription_id !== subId);
+  await prisma.user.update({
+    where: { id: sub.user_id },
+    data: {
+      is_premium: Boolean(anotherActive),
+      premium_until: anotherActive?.current_period_end ?? null,
+    },
+  });
+  if (!anotherActive) {
+    await notify(sub.user_id, {
+      type: "system",
+      title: "Subskrypcja PRO wygasła",
+      body: "Twoja subskrypcja Purre Pets PRO została zakończona. Odnów ją w sekcji Premium.",
+      link: "/rewards",
+    });
+  }
   return sub;
 }
 

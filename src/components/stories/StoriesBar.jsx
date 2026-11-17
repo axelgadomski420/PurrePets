@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/AuthContext";
 import { usePremium } from "@/components/ads/AdSlot";
 import AdSenseUnit from "@/components/ads/AdSenseUnit";
 import { getAdSenseSlot, isAdSenseEnabled } from "@/lib/adsense";
-import { Plus, Send, X } from "lucide-react";
+import { Plus, Send, X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import StoryComposer, { filterCss } from "@/components/stories/StoryComposer";
 import { cn } from "@/lib/utils";
@@ -173,6 +173,8 @@ export function StoriesBar({ onOpen }) {
       {!onOpen && selectedGroup && (
         <StoryViewer
           group={selectedGroup}
+          userId={user?.id}
+          onDeleted={reload}
           onClose={() => setSelectedGroup(null)}
         />
       )}
@@ -180,13 +182,14 @@ export function StoriesBar({ onOpen }) {
   );
 }
 
-export function StoryViewer({ group, onClose }) {
+export function StoryViewer({ group, userId, onDeleted, onClose }) {
   const [idx, setIdx] = useState(0);
   const [progress, setProgress] = useState(0);
   const [reacted, setReacted] = useState(null);
   const [muted, setMuted] = useState(true);
   const [paused, setPaused] = useState(false);
   const [viewCount, setViewCount] = useState(0);
+  const [deleting, setDeleting] = useState(false);
 
   const timerRef = useRef(null);
   const audioRef = useRef(null);
@@ -313,6 +316,31 @@ export function StoryViewer({ group, onClose }) {
     };
   }, [current?.id, current?.music_url, current?.media_type, muted]);
 
+  const canDelete = Boolean(
+    current?.id &&
+    userId &&
+    (current.author_id === userId || group?.author_id === userId)
+  );
+
+  const deleteCurrentStory = async () => {
+    if (!canDelete || deleting) return;
+
+    if (!window.confirm("Czy na pewno chcesz usunąć tę relację?")) return;
+
+    setDeleting(true);
+    try {
+      await storiesApi.remove(current.id);
+      toast.success("Relacja została usunięta.");
+      onDeleted?.();
+      onClose?.();
+    } catch (error) {
+      console.error("Story delete failed:", error);
+      toast.error("Nie udało się usunąć relacji.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const react = async (emoji) => {
     const previous = reacted;
     setReacted(emoji);
@@ -388,6 +416,19 @@ export function StoryViewer({ group, onClose }) {
           </p>
         </div>
 
+        {canDelete && (
+          <button
+            type="button"
+            onClick={deleteCurrentStory}
+            disabled={deleting}
+            aria-label="Usuń relację"
+            className="flex shrink-0 items-center gap-1 rounded-full bg-red-500/20 px-3 py-2 text-xs text-red-200 disabled:opacity-50"
+          >
+            <Trash2 className="h-4 w-4" />
+            {deleting ? "Usuwanie..." : "Usuń"}
+          </button>
+        )}
+
         {current.music_url && (
           <button
             type="button"
@@ -429,12 +470,21 @@ export function StoryViewer({ group, onClose }) {
             style={{ filter: filterCss(current.filter) }}
           />
         ) : (
-          <img
-            src={current.media_url}
-            alt=""
-            className="h-full w-full object-contain"
-            style={{ filter: filterCss(current.filter) }}
-          />
+          <div
+            className="relative flex shrink-0 items-center justify-center overflow-hidden"
+            style={{
+              width: "min(100%, calc(100dvh - 190px))",
+              maxHeight: "100%",
+              aspectRatio: "1 / 1",
+            }}
+          >
+            <img
+              src={current.media_url}
+              alt=""
+              className="h-full w-full object-contain"
+              style={{ filter: filterCss(current.filter) }}
+            />
+          </div>
         )}
 
         {current.overlay_text && (
