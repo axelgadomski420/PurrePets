@@ -10,8 +10,8 @@ export default function AppShell({ children }) {
     <div className="relative min-h-screen">
       <div className="mx-auto flex w-full max-w-[1440px]">
         <SideNav coins={coins} level={level} />
-        <main className="flex min-h-screen w-full flex-1 border-border/50 pb-24 lg:border-x lg:pb-0">
-          <div className="flex w-full flex-col">
+        <main className="flex min-h-screen w-full min-w-0 flex-1 border-border/50 pb-24 lg:border-x lg:pb-0">
+          <div className="flex w-full min-w-0 flex-col">
             <div className="flex-1">{children}</div>
             <footer className="mt-10 border-t border-border/50 px-4 py-6 text-center lg:px-8">
               <p className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground">

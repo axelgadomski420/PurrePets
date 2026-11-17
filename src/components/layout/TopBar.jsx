@@ -6,9 +6,9 @@ import NotificationBell from "@/components/layout/NotificationBell";
 export default function TopBar({ title }) {
   const navigate = useNavigate();
   return (
-    <header className="sticky top-0 z-30 flex items-center justify-between border-b border-border/50 bg-background/75 px-4 py-3 backdrop-blur-xl lg:hidden">
-      <Brand />
-      <div className="flex items-center gap-2">
+    <header className="sticky top-0 z-30 flex min-w-0 items-center justify-between gap-2 border-b border-border/50 bg-background/75 px-3 py-3 backdrop-blur-xl lg:hidden">
+      <div className="min-w-0 shrink"><Brand compact /></div>
+      <div className="flex shrink-0 items-center gap-1.5">
         <ThemeLangMenu />
         <NotificationBell />
         <button

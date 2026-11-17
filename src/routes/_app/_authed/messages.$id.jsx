@@ -39,8 +39,8 @@ function ThreadPage() {
   const peer = { id: otherId, user_id: otherId, name: otherName, display_name: otherName };
 
   return (
-    <div className="flex h-[100dvh] flex-col lg:h-screen">
-      <header className="flex items-center gap-3 border-b border-border/60 bg-background/80 px-4 py-3 backdrop-blur-xl">
+    <div className="flex h-[100dvh] min-h-0 w-full min-w-0 max-w-full flex-col overflow-hidden lg:h-screen">
+      <header className="flex min-w-0 shrink-0 items-center gap-3 border-b border-border/60 bg-background/80 px-3 py-3 backdrop-blur-xl sm:px-4">
         <button
           type="button"
           onClick={() => navigate({ to: "/messages" })}
@@ -49,7 +49,7 @@ function ThreadPage() {
         >
           <ArrowLeft className="h-4 w-4" />
         </button>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           {otherId ? (
             <Link
               to="/profile/$id"
@@ -66,7 +66,7 @@ function ThreadPage() {
           )}
         </div>
       </header>
-      <div className="min-h-0 flex-1">
+      <div className="flex min-h-0 w-full min-w-0 flex-1">
         <ChatWindow conversationId={id} peer={peer} />
       </div>
     </div>

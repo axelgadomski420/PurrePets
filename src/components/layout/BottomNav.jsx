@@ -10,7 +10,7 @@ export default function BottomNav() {
 
   return (
     <nav className="fixed inset-x-0 bottom-0 z-40 border-t border-border/60 bg-background/80 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl lg:hidden">
-      <div className="mx-auto flex max-w-lg items-stretch justify-between px-2">
+      <div className="mx-auto flex w-full min-w-0 max-w-lg items-stretch justify-between px-2">
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const active = pathname === item.to;
@@ -33,12 +33,14 @@ export default function BottomNav() {
               type="button"
               onClick={() => navigate({ to: item.to })}
               className={cn(
-                "flex flex-1 flex-col items-center gap-1 py-2.5 text-[9px] uppercase tracking-[0.14em] transition",
+                "flex min-w-0 flex-1 flex-col items-center gap-1 px-0.5 py-2.5 text-[9px] uppercase tracking-[0.14em] transition",
                 active ? "text-foreground" : "text-muted-foreground"
               )}
             >
               <Icon className={cn("h-[19px] w-[19px]", active && "text-aura")} strokeWidth={active ? 2.4 : 1.8} />
-              {t(`nav.${item.key}`)}
+              <span className="block w-full truncate text-center leading-tight">
+                {t(`nav.${item.key}`)}
+              </span>
             </button>
           );
         })}
