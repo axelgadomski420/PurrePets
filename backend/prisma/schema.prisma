@@ -680,3 +680,22 @@ model ProfileVisit {
   @@index([profile_user_id, visit_day])
   @@map("profile_visits")
 }
+
+
+// Dziennik audytowy działań administratorów i moderatorów.
+model AdminAuditLog {
+  id           String   @id @default(cuid())
+  actor_id     String
+  actor_role   String
+  action       String
+  target_type  String
+  target_id    String
+  summary      String?
+  created_date DateTime @default(now())
+
+  @@index([actor_id, created_date])
+  @@index([action, created_date])
+  @@index([target_type, target_id])
+  @@index([created_date])
+  @@map("admin_audit_logs")
+}

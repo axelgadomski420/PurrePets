@@ -41,6 +41,7 @@ function getOriginalReportDetails(details) {
 function AdminPage() {
   const { user, isAuthenticated, isLoadingAuth } = useAuth();
   const [data, setData] = useState(null);
+  const isFullAdmin = data?.is_main_admin === true;
   const [error, setError] = useState("");
   const [busy, setBusy] = useState("");
   const [tab, setTab] = useState("overview");
@@ -52,6 +53,14 @@ function AdminPage() {
   const [reportItems, setReportItems] = useState([]);
   const [reportsLoading, setReportsLoading] = useState(false);
   const [reportBusy, setReportBusy] = useState("");
+  const [users, setUsers] = useState([]);
+  const [usersQuery, setUsersQuery] = useState("");
+  const [usersLoading, setUsersLoading] = useState(false);
+  const [usersBusy, setUsersBusy] = useState("");
+  const [auditItems, setAuditItems] = useState([]);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [moderatorStats, setModeratorStats] = useState([]);
+  const [moderatorStatsLoading, setModeratorStatsLoading] = useState(false);
 
 
   useEffect(() => {
@@ -80,6 +89,60 @@ function AdminPage() {
       toast.error(err?.message ?? "Nie udało się pobrać zgłoszeń");
     } finally {
       setReportsLoading(false);
+    }
+  };
+
+  const loadUsers = async (query = usersQuery) => {
+    if (!isFullAdmin) return;
+    setUsersLoading(true);
+    try {
+      const payload = await base44.admin.users(query.trim());
+      setUsers(Array.isArray(payload?.items) ? payload.items : []);
+    } catch (err) {
+      toast.error(err?.message ?? "Nie udało się pobrać użytkowników");
+    } finally {
+      setUsersLoading(false);
+    }
+  };
+
+  const loadAudit = async () => {
+    if (!isFullAdmin) return;
+    setAuditLoading(true);
+    try {
+      const payload = await base44.admin.audit(100);
+      setAuditItems(Array.isArray(payload?.items) ? payload.items : []);
+    } catch (err) {
+      toast.error(err?.message ?? "Nie udalo sie pobrac dziennika audytowego");
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  const loadModeratorStats = async () => {
+    if (!isFullAdmin) return;
+    setModeratorStatsLoading(true);
+    try {
+      const payload = await base44.admin.moderatorStats();
+      setModeratorStats(Array.isArray(payload?.items) ? payload.items : []);
+    } catch (err) {
+      toast.error(err?.message ?? "Nie udalo sie pobrac statystyk moderatorow");
+    } finally {
+      setModeratorStatsLoading(false);
+    }
+  };
+
+  const updateManagedUser = async (item, changes) => {
+    if (!isFullAdmin || !item?.id || item.id === user?.id || item.role === "admin") return;
+    setUsersBusy(item.id);
+    try {
+      await base44.admin.updateUser(item.id, changes);
+      toast.success("Zapisano zmiany konta");
+      await loadUsers();
+      load();
+    } catch (err) {
+      toast.error(err?.message ?? "Nie udało się zmienić konta");
+    } finally {
+      setUsersBusy("");
     }
   };
 
@@ -125,7 +188,10 @@ function AdminPage() {
   useEffect(() => {
     if (tab === "media") loadMediaQueue();
     if (tab === "reports") loadReports();
-  }, [tab]);
+    if (tab === "users" && isFullAdmin) loadUsers("");
+    if (tab === "audit" && isFullAdmin) loadAudit();
+    if (tab === "moderators" && isFullAdmin) loadModeratorStats();
+  }, [tab, isFullAdmin]);
 
   const openMediaPreview = async (id) => {
     if (mediaPreviews[id]) return;
@@ -255,8 +321,6 @@ function AdminPage() {
     );
   }
 
-  const isFullAdmin = user?.role === "admin";
-
   return (
     <div>
       <TopBar title={isFullAdmin ? "Admin" : "Moderator"} />
@@ -266,7 +330,7 @@ function AdminPage() {
         </h1>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          {["overview", "verifications", "listings", "posts", "media", "reports"].map((key) => (
+          {["overview", "verifications", "listings", "posts", "media", "reports", ...(isFullAdmin ? ["users", "audit", "moderators"] : [])].map((key) => (
             <button
               key={key}
               type="button"
@@ -281,15 +345,24 @@ function AdminPage() {
               {key === "posts" && "Posty"}
               {key === "media" && "Moderacja mediów"}
               {key === "reports" && "Zgłoszenia Expurr"}
+              {key === "users" && "Użytkownicy"}
+              {key === "audit" && "Dziennik audytowy"}
+              {key === "moderators" && "Statystyki moderatorów"}
             </button>
           ))}
         </div>
 
         {(tab === "overview" || tab === "verifications") && (
           <div className="mt-4 grid gap-3 sm:grid-cols-3">
-            <Stat label="Konta" value={data?.users ?? "—"} />
-            <Stat label="Wydarzenia" value={data?.events ?? "—"} />
-            <Stat label="Do decyzji" value={(data?.verifications?.length ?? 0) + (data?.listings?.length ?? 0) + (data?.posts?.length ?? 0)} />
+            <Stat label="Konta" value={data?.stats?.users ?? "—"} />
+            <Stat label="Wydarzenia" value={data?.stats?.events ?? "—"} />
+            <Stat label="Reels" value={data?.stats?.reels ?? "—"} />
+            <Stat label="Komentarze" value={data?.stats?.comments ?? "—"} />
+            <Stat label="Aktywne Stories" value={data?.stats?.active_stories ?? "—"} />
+            <Stat label="Oczekujące" value={data?.stats?.pending ?? "—"} />
+            {isFullAdmin && <Stat label="Premium" value={data?.stats?.premium ?? "—"} />}
+            {isFullAdmin && <Stat label="Zablokowane" value={data?.stats?.banned ?? "—"} />}
+            {isFullAdmin && <Stat label="Transakcje" value={data?.stats?.transactions ?? "—"} />}
           </div>
         )}
 
@@ -664,6 +737,241 @@ function AdminPage() {
                   </article>
                 );
               })}
+            </div>
+          </section>
+        )}
+
+        {tab === "users" && isFullAdmin && (
+          <section className="mt-8 min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold">Zarządzanie użytkownikami</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Maksymalnie 60 kont. Zmiany ról i blokad są zapisywane na serwerze.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => loadUsers()}
+                disabled={usersLoading}
+                className="rounded-xl border border-border/70 px-3 py-2 text-xs"
+              >
+                Odśwież
+              </button>
+            </div>
+
+            <form
+              className="mt-4 flex min-w-0 flex-col gap-2 sm:flex-row"
+              onSubmit={(event) => {
+                event.preventDefault();
+                loadUsers(usersQuery);
+              }}
+            >
+              <input
+                value={usersQuery}
+                onChange={(event) => setUsersQuery(event.target.value)}
+                placeholder="Szukaj po e-mailu lub nazwisku"
+                className="min-w-0 flex-1 rounded-xl border border-border/70 bg-background px-3 py-3 text-sm"
+              />
+              <button
+                type="submit"
+                disabled={usersLoading}
+                className="rounded-xl btn-aura px-4 py-3 text-xs font-semibold"
+              >
+                Szukaj
+              </button>
+            </form>
+
+            <p className="mt-3 text-xs text-muted-foreground">
+              {usersLoading ? "Ładowanie kont..." : `Wyniki: ${users.length}`}
+            </p>
+
+            <div className="mt-3 grid min-w-0 gap-3">
+              {users.map((item) => (
+                <article
+                  key={item.id}
+                  className="min-w-0 rounded-2xl border border-border/70 bg-card/60 p-3 sm:p-4"
+                >
+                  <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="break-words font-semibold">
+                        {item.full_name || "Użytkownik"}
+                      </p>
+                      <p className="break-all text-xs text-muted-foreground">
+                        {item.email}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-1 text-[10px]">
+                      <span className="rounded-lg border border-border px-2 py-1">
+                        {item.role === "admin" ? "Administrator" : item.role === "moderator" ? "Moderator" : "Użytkownik"}
+                      </span>
+                      <span className={`rounded-lg px-2 py-1 ${item.banned ? "bg-destructive/10 text-destructive" : "bg-muted text-muted-foreground"}`}>
+                        {item.banned ? "Zablokowany" : "Aktywny"}
+                      </span>
+                      {item.premium && (
+                        <span className="rounded-lg bg-muted px-2 py-1">Premium</span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                    <span>Coins: {item.coins ?? 0}</span>
+                    <span>Profil: {item.profile_verified ? "Zweryfikowany" : "Niezweryfikowany"}</span>
+                    <span>E-mail: {item.email_verified ? "Potwierdzony" : "Niepotwierdzony"}</span>
+                  </div>
+
+                  {item.role !== "admin" && item.id !== user?.id && (
+                    <div className="mt-3 flex flex-wrap gap-2 border-t border-border/60 pt-3">
+                      <button
+                        type="button"
+                        disabled={usersBusy === item.id}
+                        onClick={() => updateManagedUser(item, {
+                          role: item.role === "moderator" ? "user" : "moderator"
+                        })}
+                        className="rounded-xl border border-border/70 px-3 py-2 text-xs"
+                      >
+                        {item.role === "moderator" ? "Odbierz moderatora" : "Nadaj moderatora"}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={usersBusy === item.id}
+                        onClick={() => updateManagedUser(item, { banned: !item.banned })}
+                        className="rounded-xl border border-border/70 px-3 py-2 text-xs"
+                      >
+                        {item.banned ? "Odblokuj konto" : "Zablokuj konto"}
+                      </button>
+                    </div>
+                  )}
+                </article>
+              ))}
+
+              {!usersLoading && users.length === 0 && (
+                <p className="rounded-xl border border-border/60 p-4 text-sm text-muted-foreground">
+                  Brak użytkowników do wyświetlenia.
+                </p>
+              )}
+            </div>
+          </section>
+        )}
+
+        {tab === "audit" && isFullAdmin && (
+          <section className="mt-8 min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold">Dziennik audytowy</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Ostatnie 100 zarejestrowanych działań administratorów i moderatorów.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={loadAudit}
+                disabled={auditLoading}
+                className="rounded-xl border border-border/70 px-3 py-2 text-xs"
+              >
+                Odśwież
+              </button>
+            </div>
+
+            <p className="mt-3 text-xs text-muted-foreground">
+              {auditLoading ? "Pobieranie historii..." : `Wpisy: ${auditItems.length}`}
+            </p>
+
+            <div className="mt-3 grid min-w-0 gap-3">
+              {auditItems.map((item) => (
+                <article
+                  key={item.id}
+                  className="min-w-0 rounded-2xl border border-border/70 bg-card/60 p-3 sm:p-4"
+                >
+                  <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                    <p className="break-words text-sm font-semibold">{item.action}</p>
+                    <span className="rounded-lg border border-border px-2 py-1 text-[10px]">
+                      {item.actor_role}
+                    </span>
+                  </div>
+                  <p className="mt-2 break-all text-xs text-muted-foreground">
+                    Administrator/moderator ID: {item.actor_id}
+                  </p>
+                  <p className="mt-1 break-all text-xs text-muted-foreground">
+                    Cel: {item.target_type} / {item.target_id}
+                  </p>
+                  {item.summary && (
+                    <p className="mt-2 break-words text-xs">{item.summary}</p>
+                  )}
+                  <p className="mt-2 text-[10px] text-muted-foreground">
+                    {item.created_date
+                      ? new Date(item.created_date).toLocaleString("pl-PL")
+                      : "Brak daty"}
+                  </p>
+                </article>
+              ))}
+              {!auditLoading && auditItems.length === 0 && (
+                <p className="rounded-xl border border-border/60 p-4 text-sm text-muted-foreground">
+                  Brak zapisanych działań. Sprawdź, czy migracja audytu została wdrożona.
+                </p>
+              )}
+            </div>
+          </section>
+        )}
+
+        {tab === "moderators" && isFullAdmin && (
+          <section className="mt-8 min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold">Statystyki moderatorów</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Liczba zarejestrowanych działań według kont i rodzaju czynności.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={loadModeratorStats}
+                disabled={moderatorStatsLoading}
+                className="rounded-xl border border-border/70 px-3 py-2 text-xs"
+              >
+                Odśwież
+              </button>
+            </div>
+
+            <p className="mt-3 text-xs text-muted-foreground">
+              {moderatorStatsLoading
+                ? "Pobieranie statystyk..."
+                : `Liczba kont z działaniami: ${moderatorStats.length}`}
+            </p>
+
+            <div className="mt-3 grid min-w-0 gap-3">
+              {moderatorStats.map((item) => (
+                <article
+                  key={item.actor_id}
+                  className="min-w-0 rounded-2xl border border-border/70 bg-card/60 p-3 sm:p-4"
+                >
+                  <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                    <p className="break-all text-xs font-semibold">
+                      ID: {item.actor_id}
+                    </p>
+                    <span className="rounded-lg border border-border px-2 py-1 text-[10px]">
+                      {item.actor_role}
+                    </span>
+                  </div>
+                  <p className="mt-2 font-display text-2xl">{item.total ?? 0}</p>
+                  <p className="text-[10px] text-muted-foreground">Łączna liczba działań</p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {Object.entries(item.actions || {}).map(([action, count]) => (
+                      <span
+                        key={action}
+                        className="max-w-full break-all rounded-lg bg-muted px-2 py-1 text-[10px]"
+                      >
+                        {action}: {count}
+                      </span>
+                    ))}
+                  </div>
+                </article>
+              ))}
+              {!moderatorStatsLoading && moderatorStats.length === 0 && (
+                <p className="rounded-xl border border-border/60 p-4 text-sm text-muted-foreground">
+                  Brak danych o działaniach moderatorów.
+                </p>
+              )}
             </div>
           </section>
         )}

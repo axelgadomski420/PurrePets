@@ -58,6 +58,55 @@ function requireMainAdmin(req, _res, next) {
 
 adminRouter.use(requireAuth, loadCurrentAdminUser, requireModerator);
 
+// Rejestr audytowy. Nie zapisujemy haseł, dokumentów ani treści prywatnych.
+async function writeAdminAudit(req, action, targetType, targetId, summary = null) {
+  await prisma.adminAuditLog.create({
+    data: {
+      actor_id: String(req.user.id),
+      actor_role: String(req.user.role || "moderator"),
+      action: String(action).slice(0, 80),
+      target_type: String(targetType).slice(0, 50),
+      target_id: String(targetId).slice(0, 128),
+      summary: typeof summary === "string" ? summary.slice(0, 300) : null,
+    },
+  });
+}
+
+// Historia audytowa — administrator główny.
+adminRouter.get("/audit", requireMainAdmin, asyncHandler(async (req, res) => {
+  const take = Math.min(200, Math.max(1, Number.parseInt(req.query?.take, 10) || 100));
+  const items = await prisma.adminAuditLog.findMany({
+    orderBy: { created_date: "desc" },
+    take,
+  });
+  res.json({ items });
+}));
+
+// Statystyki działań moderatorów — administrator główny.
+adminRouter.get("/moderator-stats", requireMainAdmin, asyncHandler(async (_req, res) => {
+  const groups = await prisma.adminAuditLog.groupBy({
+    by: ["actor_id", "actor_role", "action"],
+    _count: { _all: true },
+  });
+
+  const totals = {};
+  for (const row of groups) {
+    if (!totals[row.actor_id]) {
+      totals[row.actor_id] = {
+        actor_id: row.actor_id,
+        actor_role: row.actor_role,
+        total: 0,
+        actions: {},
+      };
+    }
+    totals[row.actor_id].total += row._count._all;
+    totals[row.actor_id].actions[row.action] = row._count._all;
+  }
+
+  res.json({ items: Object.values(totals) });
+}));
+
+
 // GET /api/admin/overview — statystyki na żywo + kolejki.
 adminRouter.get(
   "/overview",
@@ -78,6 +127,7 @@ adminRouter.get(
       ollamaHealth(),
     ]);
     res.json({
+      is_main_admin: isAdminAccount(req),
       verifications, listings, posts, reports,
       stats: {
         users, events, reels, comments, active_stories: stories,
@@ -125,11 +175,23 @@ adminRouter.patch(
     if (!isAdminAccount(req)) throw forbidden("Zarządzanie kontami zarezerwowane dla administratora głównego");
     const target = await prisma.user.findUnique({ where: { id: req.params.id } });
     if (!target) throw notFound("Nie znaleziono konta");
+
+    // Ochrona kont administratorow po stronie backendu.
+    if (target.id === req.user.id) {
+      throw forbidden("Nie możesz zmieniać własnego konta przez zarządzanie użytkownikami");
+    }
+
+    if (target.role === "admin") {
+      throw forbidden("Konta administratorów są chronione");
+    }
+
     const data = {};
 
     if (typeof req.body?.role === "string") {
       const role = req.body.role;
-      if (!["user", "moderator", "admin"].includes(role)) throw badRequest("role: user | moderator | admin");
+      if (!["user", "moderator"].includes(role)) {
+        throw badRequest("Dozwolone role: user | moderator");
+      }
       data.role = role;
     }
     if (typeof req.body?.banned === "boolean") data.banned = req.body.banned;
@@ -167,6 +229,14 @@ adminRouter.patch(
       await notify(target.id, { type: "system", title: "Zmiana roli", body: `Twoja nowa rola: ${data.role}.` });
     }
 
+    const changed = [];
+    if (data.role) changed.push("role:" + data.role);
+    if (typeof data.banned === "boolean") changed.push("banned:" + data.banned);
+    if (typeof req.body?.verified_badge === "boolean") changed.push("verified_badge");
+    if (Number.isFinite(req.body?.coins_delta) || typeof req.body?.coins_set === "number") changed.push("wallet");
+    if (changed.length) {
+      await writeAdminAudit(req, "user.update", "user", target.id, changed.join(", "));
+    }
     res.json({ user: { ...updated, password_hash: undefined }, wallet });
   })
 );
@@ -231,6 +301,7 @@ adminRouter.post(
       body: status === "approved" ? "Twoja hodowla otrzymała odznakę weryfikacji." : note || "Sprawdź komentarz recenzenta i złóż wniosek ponownie.",
       link: "/profile",
     });
+    await writeAdminAudit(req, "verification." + status, "verification", row.id);
     res.json(updated);
   })
 );
@@ -245,6 +316,7 @@ adminRouter.post(
       where: { id: req.params.id },
       data: { status, moderation_note: typeof req.body?.note === "string" ? req.body.note.slice(0, 300) : undefined },
     });
+    await writeAdminAudit(req, "listing." + status, "listing", listing.id);
     res.json(listing);
   })
 );
@@ -255,6 +327,7 @@ adminRouter.post(
     const status = req.body?.status;
     if (status !== "published" && status !== "hidden" && status !== "review") throw badRequest("status: published | hidden | review");
     const post = await prisma.post.update({ where: { id: req.params.id }, data: { status } });
+    await writeAdminAudit(req, "post." + status, "post", post.id);
     res.json(post);
   })
 );
@@ -396,6 +469,7 @@ adminRouter.post(
       const base = config.publicBaseUrl.replace(/\/$/, "");
       const url = `${base}/api/uploads/file/${published.file_name}`;
 
+      await writeAdminAudit(req, "media.approve", "media", record.id);
       return res.json({
         ok: true,
         status: "published",
@@ -420,6 +494,7 @@ adminRouter.post(
         reason,
       });
 
+      await writeAdminAudit(req, "media.reject", "media", record.id, "Plik odrzucony w moderacji.");
       return res.json({ ok: true, status: "rejected" });
     }
 
@@ -431,7 +506,15 @@ adminRouter.post(
 adminRouter.delete(
   "/comments/:id",
   asyncHandler(async (req, res) => {
-    await prisma.comment.delete({ where: { id: req.params.id } }).catch(() => {});
+    const deleted = await prisma.comment.deleteMany({
+      where: { id: req.params.id },
+    });
+
+    if (!deleted.count) {
+      throw notFound("Nie znaleziono komentarza.");
+    }
+
+    await writeAdminAudit(req, "comment.delete", "comment", req.params.id);
     res.json({ ok: true });
   })
 );
@@ -573,6 +656,7 @@ adminRouter.post(
       },
     });
 
+    await writeAdminAudit(req, "report." + action, "report", report.id);
     res.json(updated);
   })
 );

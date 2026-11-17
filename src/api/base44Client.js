@@ -377,6 +377,8 @@ export const reportsApi = {
 
 export const adminApi = {
   overview: () => request("/api/admin/overview"),
+  audit: (take = 100) => request(`/api/admin/audit?take=${encodeURIComponent(take)}`),
+  moderatorStats: () => request("/api/admin/moderator-stats"),
   reports: () => request("/api/admin/reports"),
   mediaModeration: () => request("/api/admin/media-moderation"),
   reviewMedia: (id, body) => request(
