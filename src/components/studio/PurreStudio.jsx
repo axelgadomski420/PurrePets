@@ -772,7 +772,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], im
                 Dodaj zdjęcia lub wideo<br />(Studio wspiera wiele plików)
               </button>
             )}
-            <div className="absolute right-2 top-1/2 z-20 flex max-h-[78%] -translate-y-1/2 flex-col gap-2 overflow-y-auto overscroll-contain rounded-2xl border border-white/15 bg-[#100e18]/80 p-1.5 shadow-xl shadow-black/40 backdrop-blur-xl">
+            <div className="absolute right-2 top-1/2 z-20 flex max-h-[78%] -translate-y-1/2 flex-col gap-2 overflow-y-auto overscroll-contain rounded-2xl border border-white/15 bg-[#100e18]/80 p-1.5 pb-8 shadow-xl shadow-black/40 backdrop-blur-xl">
               {TABS.map(({ id, label, Icon }) => (
                 <button
                   key={id}
@@ -791,6 +791,12 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], im
                   <Icon className="h-[18px] w-[18px]" />
                 </button>
               ))}
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute bottom-1 left-1/2 z-30 flex -translate-x-1/2 items-center justify-center rounded-full border border-fuchsia-300/30 bg-[#100e18]/95 p-1 text-fuchsia-200 shadow-lg shadow-fuchsia-500/30"
+              >
+                <ChevronDown className="h-4 w-4 animate-bounce" />
+              </div>
             </div>
           </div>
           <button
