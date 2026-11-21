@@ -134,6 +134,134 @@ async function countsFor(userId) {
   return { followers, following, posts, listings, pets };
 }
 
+
+// GET /api/profile/suggestions — rekomendacje osób, które możesz znać.
+// Tylko zalogowani; bez profili prywatnych i kont zbanowanych.
+profileRouter.get(
+  "/suggestions",
+  asyncHandler(async (req, res) => {
+    const parsed = Number.parseInt(req.query.limit ?? "12", 10);
+    const limit = Number.isFinite(parsed) ? Math.max(1, Math.min(24, parsed)) : 12;
+
+    const me = await prisma.profile.findFirst({
+      where: { user_id: req.user.id },
+      select: { city: true, breeds: true },
+    });
+
+    const followedRows = await prisma.follow.findMany({
+      where: { follower_id: req.user.id },
+      select: { following_id: true },
+      take: 500,
+    });
+    const followedIds = [...new Set(followedRows.map((row) => row.following_id))];
+    const excludedIds = [req.user.id, ...followedIds];
+
+    const candidates = await prisma.profile.findMany({
+      where: {
+        user_id: { notIn: excludedIds },
+        is_private: false,
+      },
+      select: {
+        id: true,
+        user_id: true,
+        display_name: true,
+        handle: true,
+        kennel_name: true,
+        avatar_url: true,
+        city: true,
+        breeds: true,
+        verified: true,
+        followers: true,
+        account_type: true,
+      },
+      orderBy: { followers: "desc" },
+      take: 120,
+    });
+
+    if (!candidates.length) {
+      return res.json({ items: [] });
+    }
+
+    const candidateIds = candidates.map((item) => item.user_id);
+
+    const activeUsers = await prisma.user.findMany({
+      where: {
+        id: { in: candidateIds },
+        banned: false,
+      },
+      select: { id: true },
+    });
+    const activeIds = new Set(activeUsers.map((item) => item.id));
+    const visibleCandidates = candidates.filter((item) => activeIds.has(item.user_id));
+
+    if (!visibleCandidates.length) {
+      return res.json({ items: [] });
+    }
+
+    // Wspólne kontakty: osoby, które obserwujesz, obserwują też kandydata.
+    const mutualRows = followedIds.length
+      ? await prisma.follow.findMany({
+          where: {
+            follower_id: { in: followedIds },
+            following_id: { in: visibleCandidates.map((item) => item.user_id) },
+          },
+          select: { following_id: true },
+        })
+      : [];
+
+    const mutualCounts = new Map();
+    for (const row of mutualRows) {
+      mutualCounts.set(
+        row.following_id,
+        (mutualCounts.get(row.following_id) ?? 0) + 1
+      );
+    }
+
+    const myBreeds = new Set(
+      (me?.breeds ?? []).map((value) => String(value).trim().toLocaleLowerCase("pl"))
+    );
+    const myCity = String(me?.city ?? "").trim().toLocaleLowerCase("pl");
+
+    const items = visibleCandidates.map((item) => {
+      const sharedBreeds = (item.breeds ?? []).filter((breed) =>
+        myBreeds.has(String(breed).trim().toLocaleLowerCase("pl"))
+      ).length;
+      const sameCity = !!myCity &&
+        String(item.city ?? "").trim().toLocaleLowerCase("pl") === myCity;
+      const mutual = mutualCounts.get(item.user_id) ?? 0;
+
+      const score =
+        mutual * 5 +
+        (sameCity ? 4 : 0) +
+        sharedBreeds * 3 +
+        (item.verified ? 1 : 0);
+
+      return {
+        id: item.id,
+        user_id: item.user_id,
+        display_name: item.display_name,
+        handle: item.handle,
+        name: item.kennel_name || item.display_name,
+        avatar_url: item.avatar_url,
+        city: item.city,
+        breeds: item.breeds ?? [],
+        verified: !!item.verified,
+        followers: item.followers ?? 0,
+        mutual_count: mutual,
+        score,
+      };
+    });
+
+    items.sort((a, b) =>
+      b.score - a.score ||
+      b.followers - a.followers ||
+      a.name.localeCompare(b.name, "pl")
+    );
+
+    res.json({ items: items.slice(0, limit) });
+  })
+);
+
 // GET /api/profile/:id/public — jeden wspólny widok dla własnego i publicznego profilu.
 profileRouter.get(
   "/:id/public",

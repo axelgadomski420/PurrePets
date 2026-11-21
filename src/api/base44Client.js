@@ -453,6 +453,7 @@ export const storiesApi = {
 
 export const profileApi = {
   me: () => request("/api/profile/me"),
+  suggestions: (limit = 12) => request(`/api/profile/suggestions?limit=${encodeURIComponent(limit)}`),
   update: (body) => request("/api/profile/me", { method: "PATCH", body }),
   // PROFIL ULTRA — wspólny widok własny/publiczny, liczby z bazy.
   publicProfile: (id) => request(`/api/profile/${encodeURIComponent(id)}/public`),

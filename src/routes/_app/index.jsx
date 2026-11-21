@@ -5,9 +5,10 @@ import TopBar from "@/components/layout/TopBar";
 import { StoriesBar } from "@/components/stories/StoriesBar";
 import PostCard from "@/components/feed/PostCard";
 import DiscoverRail from "@/components/discover/DiscoverRail";
+import PeopleYouMayKnow from "@/components/discover/PeopleYouMayKnow";
 import AdSenseUnit from "@/components/ads/AdSenseUnit";
 import { useAds } from "@/hooks/useAds";
-import { base44 } from "@/api/base44Client";
+import { base44, profileApi } from "@/api/base44Client";
 import { useAuth } from "@/lib/AuthContext";
 import { useI18n } from "@/lib/i18n";
 import { SAMPLE_BREEDERS, SAMPLE_POSTS } from "@/data/sample";
@@ -65,6 +66,18 @@ function DiscoverPage() {
       .catch(() => null);
   }, [isAuthenticated, user?.id]);
 
+  const handleDiscoverFollow = async (userId) => {
+    if (!isAuthenticated || !userId) return;
+    try {
+      await profileApi.follow(userId);
+      setFollowingIds((current) =>
+        current.includes(userId) ? current : [...current, userId]
+      );
+    } catch {
+      // Błąd operacji nie zmienia lokalnego stanu obserwowania.
+    }
+  };
+
   const isDemo = !loading && posts.length === 0;
   const visiblePosts = useMemo(() => {
     if (isDemo) return SAMPLE_POSTS;
@@ -78,6 +91,7 @@ function DiscoverPage() {
   const storyBreeders = breeders.length
     ? breeders.map((profile) => ({
         id: profile.id,
+        user_id: profile.user_id,
         name: profile.kennel_name || profile.display_name,
         handle: profile.handle || profile.display_name,
         avatar: profile.avatar_url || SAMPLE_BREEDERS[0].avatar,
@@ -160,6 +174,10 @@ function DiscoverPage() {
             <StoriesBar />
           </div>
 
+          <div className="mt-4">
+            <PeopleYouMayKnow />
+          </div>
+
           {isDemo && (
             <p className="mb-4 rounded-xl border border-aura/30 bg-aura/5 px-3 py-2 text-[11px] text-muted-foreground">
               Przykładowe treści — dodaj pierwszy post, aby PurreFeed zaczął żyć Twoją hodowlą.
@@ -191,7 +209,12 @@ function DiscoverPage() {
           )}
         </div>
 
-        <DiscoverRail breeders={storyBreeders} onNavigate={(path) => navigate({ to: path })} />
+        <DiscoverRail
+          breeders={storyBreeders}
+          followingIds={followingIds}
+          onFollow={handleDiscoverFollow}
+          onNavigate={(path) => navigate({ to: path })}
+        />
       </div>
     </div>
   );

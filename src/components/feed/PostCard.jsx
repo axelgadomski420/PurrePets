@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { Link } from "@tanstack/react-router";
 import { BadgeCheck, Heart, MessageCircle, Send, MapPin, Pencil, Trash2 } from "lucide-react";
 import { Image } from "@/components/ui/image";
 import { base44 } from "@/api/base44Client";
@@ -175,14 +176,39 @@ export default function PostCard({ post, demo = false }) {
   return (
     <article className="overflow-hidden rounded-[var(--radius)] border border-border/70 bg-card/60">
       <header className="flex items-center gap-3 px-4 py-3">
-        <Image
-          src={post.author_avatar || post.avatar}
-          alt={post.author_name || post.author}
-          className="h-10 w-10 rounded-full object-cover ring-2 ring-violet/40"
-        />
+        {post.author_id && !demo ? (
+          <Link
+            to="/profile/$id"
+            params={{ id: post.author_id }}
+            aria-label={`Otwórz profil: ${post.author_name || post.author}`}
+            className="shrink-0 rounded-full focus-visible:outline focus-visible:outline-2 focus-visible:outline-aura"
+          >
+            <Image
+              src={post.author_avatar || post.avatar}
+              alt={post.author_name || post.author}
+              className="h-10 w-10 rounded-full object-cover ring-2 ring-violet/40"
+            />
+          </Link>
+        ) : (
+          <Image
+            src={post.author_avatar || post.avatar}
+            alt={post.author_name || post.author}
+            className="h-10 w-10 rounded-full object-cover ring-2 ring-violet/40"
+          />
+        )}
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <p className="truncate text-sm font-semibold">{post.author_name || post.author}</p>
+            {post.author_id && !demo ? (
+              <Link
+                to="/profile/$id"
+                params={{ id: post.author_id }}
+                className="truncate text-sm font-semibold hover:text-aura"
+              >
+                {post.author_name || post.author}
+              </Link>
+            ) : (
+              <p className="truncate text-sm font-semibold">{post.author_name || post.author}</p>
+            )}
             {(post.author_verified ?? post.verified) && <BadgeCheck className="h-4 w-4 shrink-0 text-aura" />}
           </div>
           <p className="flex items-center gap-1 text-[11px] text-muted-foreground">

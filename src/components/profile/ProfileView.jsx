@@ -43,7 +43,7 @@ const PRIVACY_TOGGLES = [
  */
 export default function ProfileView({ profileId }) {
   const navigate = useNavigate();
-  const { user, isAuthenticated, navigateToLogin } = useAuth();
+  const { user, isAuthenticated, isLoadingAuth, navigateToLogin } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -76,6 +76,12 @@ export default function ProfileView({ profileId }) {
     : "";
 
   const load = useCallback(async () => {
+    if (isLoadingAuth) return;
+    if (!isAuthenticated) {
+      setLoading(false);
+      navigateToLogin();
+      return;
+    }
     setLoading(true);
     setError("");
     try {
@@ -102,7 +108,7 @@ export default function ProfileView({ profileId }) {
     } finally {
       setLoading(false);
     }
-  }, [profileId]);
+  }, [profileId, isLoadingAuth, isAuthenticated, navigateToLogin]);
 
   useEffect(() => { load(); }, [load]);
 

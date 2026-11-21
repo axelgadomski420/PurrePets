@@ -1,9 +1,10 @@
 import { BadgeCheck, Gamepad2, Coins, ArrowUpRight, ShieldCheck, Sparkles } from "lucide-react";
+import { Link } from "@tanstack/react-router";
 import { Image } from "@/components/ui/image";
 import { useI18n } from "@/lib/i18n";
 import { SAMPLE_DAILY } from "@/data/sample";
 
-export default function DiscoverRail({ breeders = [], onNavigate }) {
+export default function DiscoverRail({ breeders = [], onNavigate, followingIds = [], onFollow }) {
   const { t } = useI18n();
 
   return (
@@ -19,10 +20,23 @@ export default function DiscoverRail({ breeders = [], onNavigate }) {
         <ul className="mt-3 space-y-3">
           {breeders.slice(0, 3).map((breeder) => (
             <li key={breeder.id} className="flex items-center gap-3">
-              <Image src={breeder.avatar} alt={breeder.name} className="h-9 w-9 rounded-full object-cover" />
+              <Link
+                to="/profile/$id"
+                params={{ id: breeder.user_id || breeder.id }}
+                aria-label={`Profil: ${breeder.name}`}
+                className="shrink-0"
+              >
+                <Image src={breeder.avatar} alt={breeder.name} className="h-9 w-9 rounded-full object-cover" />
+              </Link>
               <div className="min-w-0 flex-1">
                 <p className="flex items-center gap-1 truncate text-xs font-medium">
-                  {breeder.name}
+                  <Link
+                    to="/profile/$id"
+                    params={{ id: breeder.user_id || breeder.id }}
+                    className="truncate hover:text-aura"
+                  >
+                    {breeder.name}
+                  </Link>
                   {breeder.verified && <BadgeCheck className="h-3 w-3 text-aura" />}
                 </p>
                 <p className="truncate text-[10px] text-muted-foreground">
@@ -31,9 +45,11 @@ export default function DiscoverRail({ breeders = [], onNavigate }) {
               </div>
               <button
                 type="button"
-                className="rounded-lg border border-border/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground transition hover:border-aura/60 hover:text-aura"
+                disabled={!breeder.user_id || !onFollow || followingIds.includes(breeder.user_id)}
+                onClick={() => onFollow?.(breeder.user_id)}
+                className="rounded-lg border border-border/70 px-2 py-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground transition hover:border-aura/60 hover:text-aura disabled:opacity-40"
               >
-                {t("common.follow")}
+                {followingIds.includes(breeder.user_id) ? "Obserwujesz" : t("common.follow")}
               </button>
             </li>
           ))}
