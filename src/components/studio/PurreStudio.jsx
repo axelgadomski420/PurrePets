@@ -60,6 +60,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], im
   const [items, setItems] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [tab, setTab] = useState("edit");
+  const [reelCaption, setReelCaption] = useState("");
   const [textLayers, setTextLayers] = useState([]);
   const [stickers, setStickers] = useState([]);
   const [selectedLayerId, setSelectedLayerId] = useState(null);
@@ -681,7 +682,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], im
         const file = new File([result.blob], "purre-studio." + result.extension, { type: result.mimeType });
         if (publish) {
           const coverBlob = await captureCover(clips);
-          await onPublish?.({ kind: "video", files: [file], coverBlob, meta: { filter: active?.filter, textLayers, stickers, musicTitle: audio.music?.title ?? null, musicUrl: audio.music?.url ?? null, hasAudio: Boolean(audio.music?.element || audio.voice?.element) } });
+          await onPublish?.({ kind: "video", files: [file], coverBlob, meta: { filter: active?.filter, textLayers, stickers, caption: reelCaption, musicTitle: audio.music?.title ?? null, musicUrl: audio.music?.url ?? null, hasAudio: Boolean(audio.music?.element || audio.voice?.element) } });
         } else {
           const url = URL.createObjectURL(result.blob);
           const anchor = document.createElement("a");
@@ -983,6 +984,23 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], im
             )}
             {tab === "export" && (
               <>
+                {mode === "reel" && (
+                  <label className="block space-y-1.5 text-[10px] font-semibold uppercase tracking-wider text-white/70">
+                    Opis rolki
+                    <textarea
+                      value={reelCaption}
+                      onChange={(event) => setReelCaption(event.target.value)}
+                      maxLength={2200}
+                      rows={4}
+                      placeholder="Napisz opis swojej rolki..."
+                      aria-label="Opis rolki"
+                      className="w-full resize-y rounded-xl border border-white/15 bg-black/30 px-3 py-2.5 text-sm font-normal normal-case tracking-normal text-white placeholder:text-white/35 focus:border-fuchsia-400/60 focus:outline-none"
+                    />
+                    <span className="block text-right text-[9px] font-normal normal-case tracking-normal text-white/40">
+                      {reelCaption.length}/2200
+                    </span>
+                  </label>
+                )}
                 {mode !== "reel" && (
                   <div className="flex gap-1.5">
                     {[{ id: "sd", label: "Standard (720p)" }].map((q) => (

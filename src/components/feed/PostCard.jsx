@@ -15,6 +15,8 @@ export default function PostCard({ post, demo = false }) {
   const [liked, setLiked] = useState(false);
   const [likeCount, setLikeCount] = useState(post.likes ?? 0);
   const [comments, setComments] = useState([]);
+  const [commentLikes, setCommentLikes] = useState({});
+  const [commentLikeCounts, setCommentLikeCounts] = useState({});
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
@@ -27,6 +29,7 @@ export default function PostCard({ post, demo = false }) {
     Array.isArray(post.tags) ? post.tags : []
   );
   const mutationLockRef = useRef(false);
+  const commentLikeLocksRef = useRef(new Set());
   const canManage = !demo && isAuthenticated &&
     (post.author_id === user?.id || post.created_by_id === user?.id);
 
@@ -37,11 +40,59 @@ export default function PostCard({ post, demo = false }) {
       base44.entities.Comment.filter({ post_id: post.id }, { sort: "created_date", limit: 30 }),
     ])
       .then(([count, page]) => {
+        const loadedComments = page.items ?? [];
         setLikeCount(count ?? 0);
-        setComments(page.items ?? []);
+        setComments(loadedComments);
+
+        if (loadedComments.length === 0) {
+          setCommentLikes({});
+          setCommentLikeCounts({});
+          return;
+        }
+
+        const commentKeys = loadedComments.map((comment) => `comment:${comment.id}`);
+
+        Promise.all([
+          fetch(
+            `/api/social/comment-likes?ids=${encodeURIComponent(
+              loadedComments.map((comment) => comment.id).join(",")
+            )}`,
+            { credentials: "include" }
+          ).then(async (response) => {
+            if (!response.ok) {
+              throw new Error("Nie udało się pobrać liczników polubień.");
+            }
+            const data = await response.json();
+            return data.counts ?? {};
+          }),
+          user?.id
+            ? base44.entities.Like.filter(
+                { post_id: { $in: commentKeys }, user_id: user.id },
+                { limit: 200 }
+              )
+            : Promise.resolve({ items: [] }),
+        ])
+          .then(([counts, likesPage]) => {
+            setCommentLikeCounts(counts ?? {});
+
+            const likedKeys = new Set(
+              (likesPage.items ?? []).map((like) => like.post_id)
+            );
+            const next = {};
+            for (const comment of loadedComments) {
+              if (likedKeys.has(`comment:${comment.id}`)) {
+                next[comment.id] = true;
+              }
+            }
+            setCommentLikes(next);
+          })
+          .catch(() => {
+            setCommentLikes({});
+            setCommentLikeCounts({});
+          });
       })
       .catch(() => null);
-  }, [post.id, demo]);
+  }, [post.id, demo, user?.id]);
 
   useEffect(() => {
     if (demo || !user?.id) return;
@@ -69,6 +120,50 @@ export default function PostCard({ post, demo = false }) {
       await base44.entities.Like.create({ post_id: post.id, user_id: user.id });
       setLiked(true);
       setLikeCount((count) => count + 1);
+    }
+  };
+
+  const toggleCommentLike = async (comment) => {
+    if (!isAuthenticated) {
+      navigateToLogin();
+      return;
+    }
+
+    if (commentLikeLocksRef.current.has(comment.id)) return;
+    commentLikeLocksRef.current.add(comment.id);
+
+    const likeKey = `comment:${comment.id}`;
+    const wasLiked = !!commentLikes[comment.id];
+
+    try {
+      if (wasLiked) {
+        const page = await base44.entities.Like.filter(
+          { post_id: likeKey, user_id: user.id },
+          { limit: 5 }
+        );
+        await Promise.all(
+          (page.items ?? []).map((item) => base44.entities.Like.delete(item.id))
+        );
+        setCommentLikes((prev) => ({ ...prev, [comment.id]: false }));
+        setCommentLikeCounts((prev) => ({
+          ...prev,
+          [comment.id]: Math.max(0, (prev[comment.id] ?? 0) - 1),
+        }));
+      } else {
+        await base44.entities.Like.create({
+          post_id: likeKey,
+          user_id: user.id,
+        });
+        setCommentLikes((prev) => ({ ...prev, [comment.id]: true }));
+        setCommentLikeCounts((prev) => ({
+          ...prev,
+          [comment.id]: (prev[comment.id] ?? 0) + 1,
+        }));
+      }
+    } catch (error) {
+      toast.error(error?.message || "Nie udało się polubić komentarza.");
+    } finally {
+      commentLikeLocksRef.current.delete(comment.id);
     }
   };
 
@@ -351,8 +446,28 @@ export default function PostCard({ post, demo = false }) {
               <ul className="max-h-52 space-y-2 overflow-y-auto pr-1">
                 {comments.map((comment) => (
                   <li key={comment.id} className="text-[12px] leading-relaxed">
-                    <span className="font-semibold">{comment.author_name}</span>{" "}
-                    <span className="text-foreground/85">{comment.content}</span>
+                    <div className="flex items-start gap-2">
+                      <div className="min-w-0 flex-1">
+                        <span className="font-semibold">{comment.author_name}</span>{" "}
+                        <span className="text-foreground/85">{comment.content}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => toggleCommentLike(comment)}
+                        className="shrink-0 rounded-full p-1 text-muted-foreground transition hover:text-destructive"
+                        aria-pressed={!!commentLikes[comment.id]}
+                        aria-label={commentLikes[comment.id] ? "Cofnij polubienie komentarza" : "Polub komentarz"}
+                        title={commentLikes[comment.id] ? "Cofnij polubienie" : "Polub komentarz"}
+                      >
+                        <Heart className={cn(
+                          "h-4 w-4 transition",
+                          commentLikes[comment.id] && "fill-destructive text-destructive"
+                        )} />
+                        <span className="ml-1 text-[10px] tabular-nums text-muted-foreground">
+                          {commentLikeCounts[comment.id] ?? 0}
+                        </span>
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>

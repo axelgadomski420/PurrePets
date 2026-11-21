@@ -140,6 +140,43 @@ async function ensureRadar() {
 }
 
 socialRouter.get(
+  "/comment-likes",
+  asyncHandler(async (req, res) => {
+    const rawIds = typeof req.query.ids === "string" ? req.query.ids : "";
+
+    if (!rawIds) {
+      return res.json({ counts: {} });
+    }
+
+    const ids = rawIds.split(",");
+
+    if (
+      ids.length > 30 ||
+      ids.some((id) => !/^[a-zA-Z0-9_-]{1,64}$/.test(id))
+    ) {
+      throw badRequest("Nieprawidłowa lista identyfikatorów komentarzy");
+    }
+
+    const keys = [...new Set(ids)].map((id) => `comment:${id}`);
+
+    const rows = await prisma.like.groupBy({
+      by: ["post_id"],
+      where: { post_id: { in: keys } },
+      _count: { _all: true },
+    });
+
+    const counts = Object.fromEntries(
+      rows.map((row) => [
+        row.post_id.slice("comment:".length),
+        row._count._all,
+      ])
+    );
+
+    res.json({ counts });
+  })
+);
+
+socialRouter.get(
   "/events",
   requireAuth,
   asyncHandler(async (req, res) => {

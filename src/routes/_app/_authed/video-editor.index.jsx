@@ -70,7 +70,7 @@ function VideoEditorPage() {
         author_handle: currentProfile?.handle,
         author_avatar: currentProfile?.avatar_url,
         author_verified: !!currentProfile?.verified,
-        caption: "Mój nowy reel",
+        caption: String(meta?.caption ?? "").trim() || "Mój nowy reel",
         image_url: coverUrl,
         image_urls: coverUrl ? [coverUrl] : [],
         video_url: videoUrl,
