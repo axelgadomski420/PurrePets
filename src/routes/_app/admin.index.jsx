@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import TopBar from "@/components/layout/TopBar";
 import { base44 } from "@/api/base44Client";
@@ -40,6 +40,7 @@ function getOriginalReportDetails(details) {
 
 function AdminPage() {
   const { user, isAuthenticated, isLoadingAuth } = useAuth();
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const isFullAdmin = data?.is_main_admin === true;
   const [error, setError] = useState("");
@@ -238,7 +239,13 @@ function AdminPage() {
     setBusy(id + status);
     try {
       await base44.admin.reviewVerification(id, { status });
-      toast.success(status === "approved" ? "Hodowca zweryfikowany" : "Wniosek odrzucony");
+      toast.success(
+        status === "approved"
+          ? "Hodowca zweryfikowany"
+          : status === "rejected"
+            ? "Wniosek odrzucony"
+            : "Wniosek przywrócony do oczekujących"
+      );
       load();
     } catch (err) {
       toast.error(err?.message ?? "Nie udało się zapisać decyzji");
@@ -475,6 +482,160 @@ function AdminPage() {
                   </div>
                 </article>
               ))}
+            </div>
+
+            <div className="mt-8 border-t border-border/60 pt-5">
+              <h3 className="text-sm font-semibold">
+                Odrzucone wnioski — możliwość ponownej weryfikacji
+              </h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Dokumenty pozostają prywatne. Możesz je ponownie sprawdzić,
+                uruchomić analizę albo przywrócić wniosek do kolejki.
+              </p>
+
+              <div className="mt-3 space-y-3">
+                {(data?.rejectedVerifications ?? []).length === 0 && (
+                  <p className="text-sm text-muted-foreground">
+                    Brak odrzuconych wniosków.
+                  </p>
+                )}
+
+                {(data?.rejectedVerifications ?? []).map((item) => (
+                  <article
+                    key={item.id}
+                    className="min-w-0 rounded-[var(--radius)] border border-destructive/30 bg-card/60 p-4"
+                  >
+                    <p className="break-words font-display text-xl">
+                      {item.kennel_name}
+                    </p>
+
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {item.city || "—"} · {item.species || "gatunek niepodany"}
+                      {" · "}rej. {item.registry_no || "brak"}
+                    </p>
+
+                    {item.reviewer_note && (
+                      <p className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">
+                        Powód odrzucenia: {item.reviewer_note}
+                      </p>
+                    )}
+
+                    {item.note && (
+                      <p className="mt-2 text-sm">{item.note}</p>
+                    )}
+
+                    {item.document_url ? (
+                      <button
+                        type="button"
+                        disabled={busy === item.id + "document"}
+                        onClick={() => openVerificationDocument(item)}
+                        className="mt-3 inline-block text-xs text-aura underline disabled:opacity-50"
+                      >
+                        {busy === item.id + "document"
+                          ? "Otwieranie dokumentu…"
+                          : "Otwórz oryginalny dokument"}
+                      </button>
+                    ) : (
+                      <p className="mt-2 text-xs text-destructive">
+                        Brak dokumentu w tym wniosku.
+                      </p>
+                    )}
+
+                    {documentPreview?.id === item.id && (
+                      <div className="mt-3 rounded-xl border border-border/70 bg-background p-3">
+                        <div className="mb-2 flex items-center justify-between gap-3">
+                          <p className="text-xs font-semibold">
+                            Podgląd dokumentu
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setDocumentPreview(null)}
+                            className="text-xs text-aura underline"
+                          >
+                            Zamknij
+                          </button>
+                        </div>
+
+                        {documentPreview.type.startsWith("image/") ? (
+                          <img
+                            src={documentPreview.url}
+                            alt="Dokument weryfikacyjny"
+                            className="max-h-[65vh] w-full rounded-lg object-contain"
+                          />
+                        ) : documentPreview.type === "application/pdf" ? (
+                          <iframe
+                            src={documentPreview.url}
+                            title="Dokument weryfikacyjny"
+                            className="h-[65vh] w-full rounded-lg border border-border"
+                          />
+                        ) : (
+                          <p className="text-xs text-muted-foreground">
+                            Ten format dokumentu nie obsługuje podglądu w przeglądarce.
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {item.ai_analyzed_at && (
+                      <div className="mt-3 rounded-xl border border-border/70 p-3">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          Poprzednia analiza AI
+                        </p>
+                        <p className="mt-1 text-sm">
+                          Rekomendacja: <strong>{item.ai_recommendation || "manual"}</strong>
+                          {item.ai_score !== null && item.ai_score !== undefined
+                            ? ` · Ocena: ${item.ai_score}/100`
+                            : ""}
+                        </p>
+                        {item.ai_reasoning && (
+                          <p className="mt-2 whitespace-pre-wrap text-xs text-muted-foreground">
+                            {item.ai_reasoning}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        disabled={busy.startsWith(item.id)}
+                        onClick={() => analyzeVerification(item.id)}
+                        className="rounded-xl border border-border/70 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] disabled:opacity-50"
+                      >
+                        {busy === item.id + "analyze"
+                          ? "Analizowanie…"
+                          : "Ponów OCR + AI"}
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={busy.startsWith(item.id)}
+                        onClick={() => {
+                          if (window.confirm("Przywrócić ten wniosek do oczekujących?")) {
+                            decide(item.id, "pending");
+                          }
+                        }}
+                        className="rounded-xl border border-border/70 px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] disabled:opacity-50"
+                      >
+                        Przywróć do oczekujących
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={busy.startsWith(item.id)}
+                        onClick={() => {
+                          if (window.confirm("Czy dokument został ponownie sprawdzony i chcesz zaakceptować tego hodowcę?")) {
+                            decide(item.id, "approved");
+                          }
+                        }}
+                        className="btn-aura rounded-xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.12em] disabled:opacity-50"
+                      >
+                        Zatwierdź ponownie
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
             </div>
           </section>
         )}
@@ -818,6 +979,19 @@ function AdminPage() {
                     <span>Coins: {item.coins ?? 0}</span>
                     <span>Profil: {item.profile_verified ? "Zweryfikowany" : "Niezweryfikowany"}</span>
                     <span>E-mail: {item.email_verified ? "Potwierdzony" : "Niepotwierdzony"}</span>
+                  </div>
+
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      onClick={() => navigate({
+                        to: "/profile/$id",
+                        params: { id: item.id },
+                      })}
+                      className="rounded-xl border border-border/70 px-3 py-2 text-xs font-semibold"
+                    >
+                      Otwórz profil
+                    </button>
                   </div>
 
                   {item.role !== "admin" && item.id !== user?.id && (

@@ -111,8 +111,9 @@ adminRouter.get("/moderator-stats", requireMainAdmin, asyncHandler(async (_req, 
 adminRouter.get(
   "/overview",
   asyncHandler(async (req, res) => {
-    const [verifications, listings, posts, users, events, reels, transactions, reports, comments, bannedCount, premiumCount, stories, health] = await Promise.all([
+    const [verifications, rejectedVerifications, listings, posts, users, events, reels, transactions, reports, comments, bannedCount, premiumCount, stories, health] = await Promise.all([
       prisma.verificationRequest.findMany({ where: { status: "pending" }, orderBy: { created_date: "asc" }, take: 40 }),
+      prisma.verificationRequest.findMany({ where: { status: "rejected" }, orderBy: { created_date: "desc" }, take: 40 }),
       prisma.listing.findMany({ where: { status: "review" }, orderBy: { created_date: "asc" }, take: 40 }),
       prisma.post.findMany({ where: { status: { in: ["review", "hidden"] } }, orderBy: { created_date: "desc" }, take: 40 }),
       prisma.user.count(),
@@ -128,7 +129,7 @@ adminRouter.get(
     ]);
     res.json({
       is_main_admin: isAdminAccount(req),
-      verifications, listings, posts, reports,
+      verifications, rejectedVerifications, listings, posts, reports,
       stats: {
         users, events, reels, comments, active_stories: stories,
         pending: verifications.length + listings.length + posts.length + reports.length,
@@ -283,25 +284,64 @@ adminRouter.get(
 adminRouter.post(
   "/verification/:id",
   asyncHandler(async (req, res) => {
-    const status = req.body?.status === "approved" ? "approved" : req.body?.status === "rejected" ? "rejected" : null;
-    if (!status) throw badRequest("status: approved albo rejected");
-    const note = typeof req.body?.reviewer_note === "string" ? req.body.reviewer_note.slice(0, 500) : null;
-    const row = await prisma.verificationRequest.findUnique({ where: { id: req.params.id } });
+    const status = ["approved", "rejected", "pending"].includes(req.body?.status)
+      ? req.body.status
+      : null;
+    if (!status) throw badRequest("status: approved, rejected albo pending");
+
+    const note = typeof req.body?.reviewer_note === "string"
+      ? req.body.reviewer_note.slice(0, 500)
+      : null;
+
+    const row = await prisma.verificationRequest.findUnique({
+      where: { id: req.params.id },
+    });
     if (!row) throw notFound();
-    const updated = await prisma.verificationRequest.update({ where: { id: row.id }, data: { status, reviewer_note: note } });
+
+    if (status === "pending" && row.status !== "rejected") {
+      throw badRequest("Do kolejki można przywrócić wyłącznie odrzucony wniosek");
+    }
+
+    const updated = await prisma.verificationRequest.update({
+      where: { id: row.id },
+      data: {
+        status,
+        reviewer_note: status === "pending" ? null : note,
+      },
+    });
+
     if (status === "approved") {
       await prisma.profile.updateMany({
         where: { user_id: row.user_id },
         data: { verified: true, account_type: "breeder", kennel_name: row.kennel_name },
       });
     }
-    await notify(row.user_id, {
-      type: "verification",
-      title: status === "approved" ? "Hodowla zweryfikowana ✅" : "Wniosek odrzucony",
-      body: status === "approved" ? "Twoja hodowla otrzymała odznakę weryfikacji." : note || "Sprawdź komentarz recenzenta i złóż wniosek ponownie.",
-      link: "/profile",
-    });
-    await writeAdminAudit(req, "verification." + status, "verification", row.id);
+
+    if (status === "approved" || status === "rejected" || status === "pending") {
+      await notify(row.user_id, {
+        type: "verification",
+        title: status === "approved"
+          ? "Hodowla zweryfikowana ✅"
+          : status === "rejected"
+            ? "Wniosek odrzucony"
+            : "Wniosek ponownie oczekuje na weryfikację",
+        body: status === "approved"
+          ? "Twoja hodowla otrzymała odznakę weryfikacji."
+          : status === "rejected"
+            ? note || "Sprawdź komentarz recenzenta i złóż wniosek ponownie."
+            : "Administrator przywrócił Twój wniosek do ponownego rozpatrzenia.",
+        link: "/profile",
+      });
+    }
+
+    await writeAdminAudit(
+      req,
+      status === "pending" ? "verification.reopened" : "verification." + status,
+      "verification",
+      row.id,
+      status === "pending" ? "Przywrócono odrzucony wniosek do kolejki." : null
+    );
+
     res.json(updated);
   })
 );
