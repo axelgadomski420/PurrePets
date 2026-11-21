@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  ArrowLeft, ArrowRight, Crop, Download, Film, Image as ImageIcon,
+  ArrowLeft, ArrowRight, ChevronDown, Crop, Download, Film, Image as ImageIcon, Send,
   Layers, Loader2, Mic, Music2, Plus, Redo2, RotateCcw, Scissors, Sliders,
   Sparkles, Sticker, Trash2, Type, Undo2, Volume2, VolumeX, Wand2, X,
 } from "lucide-react";
@@ -129,6 +129,7 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], im
   const previewCanvasRef = useRef(null);
   const videoRefs = useRef(new Map());
   const dragRef = useRef(null);
+  const toolsPanelRef = useRef(null);
 
   const active = items.find((item) => item.id === activeId) ?? items[0] ?? null;
   const hasVideo = items.some((item) => item.type === "video");
@@ -792,6 +793,15 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], im
               ))}
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => toolsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })}
+            className="group mx-auto flex shrink-0 items-center gap-2 rounded-full border border-fuchsia-300/30 bg-fuchsia-500/10 px-4 py-1.5 text-[9px] font-bold uppercase tracking-[0.14em] text-fuchsia-100 shadow-[0_0_22px_rgba(217,70,239,0.14)] transition hover:bg-fuchsia-500/20"
+            aria-label="Przejdź do narzędzi edycji i publikacji"
+          >
+            <span>Narzędzia i publikacja poniżej</span>
+            <ChevronDown className="h-4 w-4 animate-bounce" />
+          </button>
           <div className="no-scrollbar flex shrink-0 items-center gap-2 overflow-x-auto rounded-2xl border border-violet-200/[0.12] bg-[#100e18]/95 p-2 shadow-[0_16px_45px_-24px_rgba(0,0,0,0.95)] backdrop-blur-xl">
             {items.map((item, index) => (
               <button key={item.id} type="button" onClick={() => setActiveId(item.id)} className={cn("relative h-[4.25rem] w-[3.1rem] shrink-0 overflow-hidden rounded-xl border-2 transition-all duration-200", item.id === active?.id ? "border-fuchsia-400 shadow-[0_0_18px_rgba(217,70,239,0.25)]" : "border-white/10 opacity-70 hover:opacity-100")}>
@@ -813,8 +823,8 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], im
           </div>
         </div>
 
-        <div className="no-scrollbar flex max-h-[min(38dvh,22rem)] min-h-0 w-full shrink-0 flex-col overflow-y-auto overscroll-contain rounded-[1.35rem] border border-violet-200/[0.14] bg-[linear-gradient(145deg,rgba(28,23,42,0.97),rgba(13,12,20,0.98))] p-3 shadow-[0_20px_70px_-30px_rgba(0,0,0,0.9)] backdrop-blur-2xl sm:max-h-[min(42dvh,28rem)] sm:p-4 lg:max-h-none lg:w-[22rem] lg:rounded-[1.75rem] lg:p-5">
-          <div className="mt-4 min-h-0 space-y-4 overflow-y-auto overscroll-contain px-0.5 pb-2 text-white [&_input:not([type=range]):not([type=color]):not([type=checkbox])]:outline-none [&_input:not([type=range]):not([type=color]):not([type=checkbox])]:focus:border-fuchsia-400/60 [&_button]:transition-all [&_button]:duration-200">
+        <div ref={toolsPanelRef} className="no-scrollbar flex max-h-[min(38dvh,22rem)] min-h-0 w-full shrink-0 flex-col overflow-hidden overscroll-contain rounded-[1.35rem] border border-violet-200/[0.14] bg-[linear-gradient(145deg,rgba(28,23,42,0.97),rgba(13,12,20,0.98))] p-3 shadow-[0_20px_70px_-30px_rgba(0,0,0,0.9)] backdrop-blur-2xl sm:max-h-[min(42dvh,28rem)] sm:p-4 lg:max-h-none lg:w-[22rem] lg:rounded-[1.75rem] lg:p-5">
+          <div className="mt-1 flex-1 min-h-0 space-y-4 overflow-y-auto overscroll-contain px-0.5 pb-2 text-white [&_input:not([type=range]):not([type=color]):not([type=checkbox])]:outline-none [&_input:not([type=range]):not([type=color]):not([type=checkbox])]:focus:border-fuchsia-400/60 [&_button]:transition-all [&_button]:duration-200">
             {tab === "edit" && active && (
               <>
                 {active.type === "image" && (
@@ -974,23 +984,37 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], im
                     ))}
                   </div>
                 )}
-                {exporting && (
-                  <div>
-                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
-                      <div className="h-full rounded-full bg-gradient-to-r from-violet to-aura transition-all" style={{ width: progress + "%" }} />
-                    </div>
-                    <button type="button" onClick={() => { cancelRef.current = true; }} className="mt-2 w-full rounded-lg border border-red-400/50 py-1.5 text-[10px] uppercase text-red-300">Anuluj eksport</button>
-                  </div>
-                )}
-                <button type="button" onClick={() => runExport({ publish: true })} disabled={!items.length || exporting} className="btn-aura flex w-full items-center justify-center gap-2 rounded-xl py-3 text-[10px] font-semibold uppercase tracking-widest disabled:opacity-50">
-                  {exporting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null} {publishLabel}
-                </button>
-                <button type="button" onClick={() => runExport({ publish: false })} disabled={!items.length || exporting} className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/15 py-2.5 text-[10px] uppercase tracking-widest text-white/80 disabled:opacity-50">
+                 <button type="button" onClick={() => runExport({ publish: false })} disabled={!items.length || exporting} className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/15 py-2.5 text-[10px] uppercase tracking-widest text-white/80 disabled:opacity-50">
                   <Download className="h-3.5 w-3.5" /> Zapisz na urządzenie
                 </button>
                 <p className="text-[9px] text-white/40">Eksport: MP4/H.264 gdy przeglądarka wspiera (Safari iOS), inaczej WebM. Efekty, tekst i muzyka są wypalane w pliku.</p>
               </>
             )}
+          </div>
+
+          <div className="shrink-0 border-t border-white/10 bg-[#100e18]/95 pt-3">
+            {exporting && (
+              <div className="mb-2 space-y-2">
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/10">
+                  <div className="h-full rounded-full bg-gradient-to-r from-[#f58529] via-[#dd2a7b] to-[#8134af] transition-all" style={{ width: progress + "%" }} />
+                </div>
+                <button type="button" onClick={() => { cancelRef.current = true; }} className="w-full rounded-lg border border-red-400/40 py-1.5 text-[10px] font-semibold uppercase text-red-300">
+                  Anuluj eksport
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => runExport({ publish: true })}
+              disabled={!items.length || exporting}
+              className="group relative flex min-h-14 w-full items-center justify-center gap-3 overflow-hidden rounded-2xl border border-white/25 bg-gradient-to-r from-[#f58529] via-[#dd2a7b] to-[#8134af] px-4 py-3 text-xs font-black uppercase tracking-[0.16em] text-white shadow-[0_10px_30px_rgba(221,42,123,0.32)] transition hover:brightness-110 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {exporting ? <Loader2 className="h-5 w-5 animate-spin" /> : <Send className="h-5 w-5" />}
+              <span>{exporting ? "Przygotowywanie publikacji…" : publishLabel}</span>
+            </button>
+            <p className="mt-2 text-center text-[9px] text-white/45">
+              Gotowe? Opublikuj swoją edycję
+            </p>
           </div>
         </div>
       </div>
