@@ -14,37 +14,39 @@ export default function NewChatDialog({ open, onClose }) {
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState(null);
 
-  // H: wyszukiwanie SERWEROWE (globalna wyszukiwarka /api/search?type=people) —
-  // dotychczas ładowano tylko TOP-60 profili po followersach i filtrowano lokalnie,
-  // więc użytkownicy spoza TOP-60 byli nieosiągalni. Debounce 300 ms.
+  // Wyszukiwanie osób po stronie serwera. Nie zastępujemy pustych
+  // wyników TOP-60, bo ukrywało to błędy i pomijało mniej popularne profile.
   useEffect(() => {
     if (!open) return undefined;
+
     let active = true;
     const needle = query.trim();
     setLoading(true);
+
     const timer = setTimeout(async () => {
-      const fallback = async () => {
-        const page = await base44.entities.Profile.list({ sort: "-followers", limit: 60 });
-        return page.items ?? [];
-      };
       try {
         if (needle.length >= 2) {
           const res = await base44.search.search(needle, "people");
-          const found = res?.people ?? [];
-          if (active) setProfiles(found.length ? found : await fallback());
+          if (active) {
+            setProfiles(Array.isArray(res?.people) ? res.people : []);
+          }
         } else {
-          if (active) setProfiles(await fallback());
+          const page = await base44.entities.Profile.list({
+            sort: "-followers",
+            limit: 60,
+          });
+          if (active) setProfiles(page.items ?? []);
         }
-      } catch {
-        try {
-          if (active) setProfiles(await fallback());
-        } catch {
-          if (active) setProfiles([]);
+      } catch (error) {
+        if (active) {
+          setProfiles([]);
+          console.error("Wyszukiwanie osób nie powiodło się:", error);
         }
       } finally {
         if (active) setLoading(false);
       }
     }, 300);
+
     return () => {
       active = false;
       clearTimeout(timer);
@@ -54,15 +56,11 @@ export default function NewChatDialog({ open, onClose }) {
   if (!open) return null;
 
   const needle = query.trim().toLowerCase();
-  const results = profiles.filter((profile) => {
-    if (!profile.user_id || profile.user_id === user?.id) return false;
-    if (needle.length < 2) return true; // przy krótkim zapytaniu serwer zwraca TOP — bez dodatkowego filtra
-    const hay = [profile.display_name, profile.kennel_name, profile.handle, profile.city]
-      .filter(Boolean)
-      .join(" ")
-      .toLowerCase();
-    return hay.includes(needle);
-  });
+  // Serwer już przefiltrował wyniki. Nie filtrujemy ich ponownie,
+  // bo odrzucało to dopasowania po rasie i opisie profilu.
+  const results = profiles.filter(
+    (profile) => profile.user_id && profile.user_id !== user?.id
+  );
 
   const start = async (profile) => {
     setBusyId(profile.id);

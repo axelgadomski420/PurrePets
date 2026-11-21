@@ -15,17 +15,55 @@ searchRouter.get(
     const empty = { query: q, people: [], posts: [], listings: [], groups: [], audio: [], events: [], pets: [], tags: [] };
     if (q.length < 2) return res.json(empty);
     const like = { contains: q, mode: "insensitive" };
+    const personQuery = q.replace(/^@/, "").trim();
+    const personLike = { contains: personQuery, mode: "insensitive" };
     const want = (t) => type === "all" || type === t;
     const tag = q.toLowerCase().replace(/^#/, "");
 
     const [people, posts, listings, groups, audio, events, pets, tagPosts] = await Promise.all([
       want("people")
-        ? prisma.profile.findMany({
-            where: { OR: [{ display_name: like }, { kennel_name: like }, { handle: like }, { city: like }, { bio: like }, { breeds: { has: q } }] },
-            orderBy: { followers: "desc" },
-            take: 20,
-            select: { id: true, user_id: true, display_name: true, handle: true, kennel_name: true, avatar_url: true, city: true, verified: true, account_type: true, followers: true },
-          })
+        ? (async () => {
+            const matches = await prisma.profile.findMany({
+              where: {
+                is_private: false,
+                OR: [
+                  { display_name: personLike },
+                  { kennel_name: personLike },
+                  { handle: personLike },
+                  { city: personLike },
+                  { bio: personLike },
+                  { breeds: { has: personQuery } },
+                ],
+              },
+              orderBy: { followers: "desc" },
+              take: 50,
+              select: {
+                id: true,
+                user_id: true,
+                display_name: true,
+                handle: true,
+                kennel_name: true,
+                avatar_url: true,
+                city: true,
+                verified: true,
+                account_type: true,
+                followers: true,
+              },
+            });
+
+            if (!matches.length) return [];
+
+            const activeUsers = await prisma.user.findMany({
+              where: {
+                id: { in: matches.map((profile) => profile.user_id) },
+                banned: false,
+              },
+              select: { id: true },
+            });
+
+            const activeIds = new Set(activeUsers.map((user) => user.id));
+            return matches.filter((profile) => activeIds.has(profile.user_id));
+          })()
         : [],
       want("posts")
         ? prisma.post.findMany({
