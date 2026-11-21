@@ -185,6 +185,7 @@ export default function StoryComposer({ onClose, onPublished }) {
         mode="story"
         imageFormat="square"
         initialFiles={file ? [file] : []}
+        initialMusic={track}
         publishLabel="Publikuj relację"
         onClose={() => setStudioOpen(false)}
         onPublish={handlePublish}

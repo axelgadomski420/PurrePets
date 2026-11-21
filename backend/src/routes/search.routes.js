@@ -13,11 +13,24 @@ searchRouter.get(
     const q = (typeof req.query.q === "string" ? req.query.q : "").trim();
     const type = typeof req.query.type === "string" ? req.query.type : "all";
     const empty = { query: q, people: [], posts: [], listings: [], groups: [], audio: [], events: [], pets: [], tags: [] };
+
+    const authenticated = Boolean(req.user?.id);
+
+    // Goscie moga wyszukiwac tylko ogloszenia.
+    if (!authenticated && !["all", "listings"].includes(type)) {
+      return res.status(403).json({
+        error: "Zaloguj sie, aby korzystac z pelnego wyszukiwania."
+      });
+    }
+
     if (q.length < 2) return res.json(empty);
+
     const like = { contains: q, mode: "insensitive" };
     const personQuery = q.replace(/^@/, "").trim();
     const personLike = { contains: personQuery, mode: "insensitive" };
-    const want = (t) => type === "all" || type === t;
+    const want = (t) => authenticated
+      ? (type === "all" || type === t)
+      : t === "listings";
     const tag = q.toLowerCase().replace(/^#/, "");
 
     const [people, posts, listings, groups, audio, events, pets, tagPosts] = await Promise.all([
@@ -70,7 +83,7 @@ searchRouter.get(
             where: { status: "published", OR: [{ caption: like }, { breed: like }, { city: like }, { tags: { has: tag } }] },
             orderBy: { created_date: "desc" },
             take: 20,
-            select: { id: true, author_name: true, author_avatar: true, caption: true, image_url: true, video_url: true, likes: true, tags: true, created_date: true },
+            select: { id: true, author_id: true, author_name: true, author_avatar: true, caption: true, image_url: true, video_url: true, likes: true, tags: true, created_date: true },
           })
         : [],
       want("listings")
@@ -83,7 +96,7 @@ searchRouter.get(
         : [],
       want("groups")
         ? prisma.group.findMany({
-            where: { OR: [{ name: like }, { description: like }, { breed: like }, { city: like }] },
+            where: { is_public: true, OR: [{ name: like }, { description: like }, { breed: like }, { city: like }] },
             orderBy: { members_count: "desc" },
             take: 15,
             select: { id: true, name: true, description: true, type: true, members_count: true, cover_url: true },
@@ -106,7 +119,7 @@ searchRouter.get(
         : [],
       want("pets")
         ? prisma.pet.findMany({
-            where: { OR: [{ name: like }, { breed: like }, { color: like }, { city: like }] },
+            where: { is_public: true, OR: [{ name: like }, { breed: like }, { color: like }, { city: like }] },
             orderBy: { created_date: "desc" },
             take: 15,
             select: { id: true, name: true, species: true, breed: true, photos: true, city: true, owner_name: true },
@@ -120,7 +133,7 @@ searchRouter.get(
 
     const tagCounts = new Map();
     for (const p of tagPosts) for (const t of p.tags ?? []) {
-      if (t.includes(tag)) tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
+      if (String(t).toLowerCase().includes(tag)) tagCounts.set(t, (tagCounts.get(t) ?? 0) + 1);
     }
     const tags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count }));
 
@@ -135,11 +148,28 @@ searchRouter.get(
   asyncHandler(async (req, res) => {
     const q = (typeof req.query.q === "string" ? req.query.q : "").trim().toLowerCase().replace(/^#/, "");
     if (q.length < 1) return res.json({ profiles: [], breeds: [], tags: [] });
+
     const like = { contains: q, mode: "insensitive" };
+
+    // Goscie otrzymuja podpowiedzi ras wylacznie z ogloszen.
+    if (!req.user?.id) {
+      const listingBreeds = await prisma.listing.findMany({
+        where: { status: "active", breed: like },
+        distinct: ["breed"],
+        take: 6,
+        select: { breed: true },
+      });
+
+      const breeds = [...new Set(
+        listingBreeds.map((item) => item.breed).filter(Boolean)
+      )].slice(0, 6);
+
+      return res.json({ profiles: [], breeds, tags: [] });
+    }
 
     const [profiles, listingBreeds, postBreeds, tagPosts] = await Promise.all([
       prisma.profile.findMany({
-        where: { OR: [{ display_name: like }, { kennel_name: like }, { handle: like }] },
+        where: { is_private: false, OR: [{ display_name: like }, { kennel_name: like }, { handle: like }] },
         orderBy: { followers: "desc" },
         take: 5,
         select: { id: true, user_id: true, display_name: true, handle: true, kennel_name: true, avatar_url: true, verified: true },
@@ -156,6 +186,15 @@ searchRouter.get(
     }
     const tags = [...tagCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6).map(([name]) => name);
 
-    res.json({ profiles, breeds, tags });
+    const activeUsers = profiles.length
+      ? await prisma.user.findMany({
+          where: { id: { in: profiles.map((profile) => profile.user_id) }, banned: false },
+          select: { id: true },
+        })
+      : [];
+    const activeIds = new Set(activeUsers.map((user) => user.id));
+    const visibleProfiles = profiles.filter((profile) => activeIds.has(profile.user_id));
+
+    res.json({ profiles: visibleProfiles, breeds, tags });
   })
 );

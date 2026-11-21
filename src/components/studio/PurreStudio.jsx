@@ -56,7 +56,7 @@ function formatForMode(mode) {
  * Undo/redo, reset, autosave projektu + przywracanie wersji roboczej.
  * Publikacja zwraca WYEXPORTOWANE pliki (efekty wypalone), nigdy oryginały.
  */
-export default function PurreStudio({ open, mode = "free", initialFiles = [], imageFormat = null, onClose, onPublish, publishLabel = "Publikuj" }) {
+export default function PurreStudio({ open, mode = "free", initialFiles = [], initialMusic = null, imageFormat = null, onClose, onPublish, publishLabel = "Publikuj" }) {
   const [items, setItems] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [tab, setTab] = useState("edit");
@@ -458,6 +458,21 @@ export default function PurreStudio({ open, mode = "free", initialFiles = [], im
       music: nextMusic,
     }));
   };
+
+  useEffect(() => {
+    if (!open || !initialMusic?.url) return;
+
+    const current = audioRef.current?.music;
+    if (
+      current?.id === initialMusic.id &&
+      current?.url === initialMusic.url
+    ) {
+      return;
+    }
+
+    pickMusicTrack(initialMusic);
+  }, [open, initialMusic?.id, initialMusic?.url]);
+
   const toggleRecording = async () => {
     if (recording) {
       mediaRecorderRef.current?.stop();

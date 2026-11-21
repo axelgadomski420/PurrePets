@@ -19,9 +19,34 @@ export const Route = createFileRoute("/_app/_authed/video-editor/")({
  * muzyka + voiceover miksowane w eksporcie, MP4/H.264 lub WebM.
  * Publikacja wysyła WYEXPORTOWANY materiał (+ okładka) — nigdy oryginał.
  */
+function readInitialMusic() {
+  try {
+    if (typeof window === "undefined") return null;
+
+    const raw = new URLSearchParams(window.location.search).get("music");
+    if (!raw) return null;
+
+    const track = JSON.parse(raw);
+
+    if (
+      !track ||
+      typeof track !== "object" ||
+      typeof track.url !== "string" ||
+      !track.url.trim()
+    ) {
+      return null;
+    }
+
+    return track;
+  } catch {
+    return null;
+  }
+}
+
 function VideoEditorPage() {
   const navigate = useNavigate();
   const { user, navigateToLogin } = useAuth();
+  const [initialMusic] = useState(readInitialMusic);
   const [studioOpen, setStudioOpen] = useState(false);
   const [stage, setStage] = useState("");
 
@@ -119,6 +144,7 @@ function VideoEditorPage() {
 
       <PurreStudio
         open={studioOpen}
+        initialMusic={initialMusic}
         mode="reel"
         publishLabel="Publikuj jako Reel"
         onClose={() => setStudioOpen(false)}
