@@ -15,14 +15,7 @@ export const Route = createFileRoute("/_app/community/")({
   component: CommunityPage,
 });
 
-const FALLBACK = [
-  { id: "g1", name: "Maine Coon Polska", description: "Mioty, testy HCM i zdjęcia z ringów.", type: "breed", breed: "Maine Coon", members_count: 128, joined: false },
-  { id: "g2", name: "British Shorthair", description: "Kolory, wady zgryzu i polecane krycia.", type: "breed", breed: "British Shorthair", members_count: 96, joined: false },
-  { id: "g3", name: "Samoyed Club", description: "Szczenięta, zaprzęgi i pielęgnacja szaty.", type: "breed", breed: "Samoyed", members_count: 74, joined: false },
-  { id: "g4", name: "Warszawa — hodowle", description: "Spotkania, odbiory i polecane kliniki.", type: "regional", city: "Warszawa", members_count: 210, joined: false },
-  { id: "g5", name: "Kraków — psy i koty", description: "Regionalny radar wydarzeń i adopcji.", type: "regional", city: "Kraków", members_count: 154, joined: false },
-  { id: "g6", name: "Adopcje odpowiedzialne", description: "Dom tymczasowy, umowy i checklista kupującego.", type: "topic", members_count: 340, joined: false },
-];
+
 
 const FILTERS = [
   { id: "all", label: "Wszystkie" },
@@ -46,9 +39,9 @@ function CommunityPage() {
         setOffline(false);
       })
       .catch(() => {
-        setOffline(true);
-        setGroups(FALLBACK.filter((group) => type === "all" || group.type === type));
-      });
+          setOffline(true);
+          setGroups([]);
+        });
   };
 
   useEffect(() => {
@@ -58,7 +51,7 @@ function CommunityPage() {
 
   const toggle = async (group) => {
     if (offline) {
-      toast.error("Dołączenie zapisze się po aktualizacji bazy.");
+      toast.error("Brak połączenia z serwerem. Nie można teraz zmienić członkostwa.");
       return;
     }
     if (!isAuthenticated) {
@@ -132,7 +125,7 @@ function CommunityPage() {
 
         {offline && (
           <p className="mt-4 rounded-xl border border-chart-4/40 bg-chart-4/10 px-3 py-2 text-[11px] text-muted-foreground">
-            Podgląd klubów. Członkostwo zapisze się na koncie, gdy backend będzie miał nowe tabele.
+            Brak połączenia z serwerem. Nie można teraz pobrać listy społeczności. Spróbuj ponownie później.
           </p>
         )}
 

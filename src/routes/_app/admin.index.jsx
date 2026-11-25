@@ -62,6 +62,9 @@ function AdminPage() {
   const [auditLoading, setAuditLoading] = useState(false);
   const [moderatorStats, setModeratorStats] = useState([]);
   const [moderatorStatsLoading, setModeratorStatsLoading] = useState(false);
+  const [eventItems, setEventItems] = useState([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventsBusy, setEventsBusy] = useState("");
 
 
   useEffect(() => {
@@ -132,6 +135,42 @@ function AdminPage() {
     }
   };
 
+  const loadEvents = async () => {
+    if (!isFullAdmin) return;
+
+    setEventsLoading(true);
+    try {
+      const payload = await base44.admin.events();
+      setEventItems(Array.isArray(payload?.items) ? payload.items : []);
+    } catch (err) {
+      toast.error(err?.message ?? "Nie udało się pobrać wydarzeń");
+    } finally {
+      setEventsLoading(false);
+    }
+  };
+
+  const deleteManagedEvent = async (item) => {
+    if (!isFullAdmin || !item?.id) return;
+
+    const confirmed = window.confirm(
+      `Czy na pewno usunąć wydarzenie „${item.title}”? Operacja usunie wydarzenie i listę RSVP. Historyczne zapisy biletów i rozliczenia Coins pozostaną zachowane.`
+    );
+
+    if (!confirmed) return;
+
+    setEventsBusy(item.id);
+    try {
+      await base44.admin.deleteEvent(item.id);
+      toast.success("Wydarzenie zostało usunięte");
+      await loadEvents();
+      await load();
+    } catch (err) {
+      toast.error(err?.message ?? "Nie udało się usunąć wydarzenia");
+    } finally {
+      setEventsBusy("");
+    }
+  };
+
   const updateManagedUser = async (item, changes) => {
     if (!isFullAdmin || !item?.id || item.id === user?.id || item.role === "admin") return;
     setUsersBusy(item.id);
@@ -142,6 +181,39 @@ function AdminPage() {
       load();
     } catch (err) {
       toast.error(err?.message ?? "Nie udało się zmienić konta");
+    } finally {
+      setUsersBusy("");
+    }
+  };
+
+  const deleteManagedUser = async (item) => {
+    if (!isFullAdmin || !item?.id || item.id === user?.id || item.role === "admin") return;
+
+    const typedEmail = window.prompt(
+      "Trwałe usunięcie konta. Wpisz dokładny adres e-mail użytkownika:",
+      ""
+    );
+
+    if (typedEmail === null) return;
+
+    if (typedEmail.trim().toLowerCase() !== String(item.email || "").trim().toLowerCase()) {
+      toast.error("Adres e-mail nie jest zgodny. Konto nie zostało usunięte.");
+      return;
+    }
+
+    if (!window.confirm(
+      `UWAGA: Konto ${item.email} i jego treści zostaną trwale usunięte. Tej operacji nie można cofnąć. Kontynuować?`
+    )) return;
+
+    setUsersBusy(item.id);
+
+    try {
+      await base44.admin.deleteUser(item.id, typedEmail.trim());
+      toast.success("Konto i powiązane dane zostały usunięte");
+      await loadUsers();
+      await load();
+    } catch (err) {
+      toast.error(err?.message ?? "Nie udało się usunąć konta");
     } finally {
       setUsersBusy("");
     }
@@ -192,6 +264,7 @@ function AdminPage() {
     if (tab === "users" && isFullAdmin) loadUsers("");
     if (tab === "audit" && isFullAdmin) loadAudit();
     if (tab === "moderators" && isFullAdmin) loadModeratorStats();
+    if (tab === "events" && isFullAdmin) loadEvents();
   }, [tab, isFullAdmin]);
 
   const openMediaPreview = async (id) => {
@@ -337,7 +410,7 @@ function AdminPage() {
         </h1>
 
         <div className="mt-4 flex flex-wrap gap-2">
-          {["overview", "verifications", "listings", "posts", "media", "reports", ...(isFullAdmin ? ["users", "audit", "moderators"] : [])].map((key) => (
+          {["overview", "verifications", "listings", "posts", "media", "reports", ...(isFullAdmin ? ["users", "audit", "moderators", "events"] : [])].map((key) => (
             <button
               key={key}
               type="button"
@@ -355,6 +428,7 @@ function AdminPage() {
               {key === "users" && "Użytkownicy"}
               {key === "audit" && "Dziennik audytowy"}
               {key === "moderators" && "Statystyki moderatorów"}
+              {key === "events" && "Wydarzenia"}
             </button>
           ))}
         </div>
@@ -1006,14 +1080,22 @@ function AdminPage() {
                       >
                         {item.role === "moderator" ? "Odbierz moderatora" : "Nadaj moderatora"}
                       </button>
-                      <button
-                        type="button"
-                        disabled={usersBusy === item.id}
-                        onClick={() => updateManagedUser(item, { banned: !item.banned })}
-                        className="rounded-xl border border-border/70 px-3 py-2 text-xs"
-                      >
-                        {item.banned ? "Odblokuj konto" : "Zablokuj konto"}
-                      </button>
+                        <button
+                          type="button"
+                          disabled={usersBusy === item.id}
+                          onClick={() => updateManagedUser(item, { banned: !item.banned })}
+                          className="rounded-xl border border-border/70 px-3 py-2 text-xs"
+                        >
+                          {item.banned ? "Odblokuj konto" : "Zablokuj konto"}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={usersBusy === item.id}
+                          onClick={() => deleteManagedUser(item)}
+                          className="rounded-xl border border-destructive/50 px-3 py-2 text-xs text-destructive disabled:opacity-50"
+                        >
+                          {usersBusy === item.id ? "Przetwarzanie..." : "Usuń konto"}
+                        </button>
                     </div>
                   )}
                 </article>
@@ -1146,6 +1228,74 @@ function AdminPage() {
                   Brak danych o działaniach moderatorów.
                 </p>
               )}
+            </div>
+          </section>
+        )}
+
+        {tab === "events" && isFullAdmin && (
+          <section className="mt-8 min-w-0">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-semibold">Zarządzanie wydarzeniami</h2>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Usuwanie wydarzeń jest dostępne wyłącznie administratorowi głównemu.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={loadEvents}
+                disabled={eventsLoading}
+                className="rounded-xl border border-border/70 px-3 py-2 text-xs disabled:opacity-50"
+              >
+                {eventsLoading ? "Odświeżanie..." : "Odśwież"}
+              </button>
+            </div>
+
+            {eventsLoading && (
+              <p className="mt-4 text-sm text-muted-foreground">Pobieranie wydarzeń...</p>
+            )}
+
+            {!eventsLoading && eventItems.length === 0 && (
+              <p className="mt-4 rounded-xl border border-border/60 p-4 text-sm text-muted-foreground">
+                Brak wydarzeń.
+              </p>
+            )}
+
+            <div className="mt-4 grid min-w-0 gap-3">
+              {eventItems.map((item) => (
+                <article
+                  key={item.id}
+                  className="min-w-0 rounded-2xl border border-border/70 bg-card/60 p-4"
+                >
+                  <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <h3 className="break-words text-sm font-semibold">{item.title}</h3>
+                      <p className="mt-1 break-words text-xs text-muted-foreground">
+                        {item.city || "—"} · {item.location || "Miejsce niepodane"}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {item.start_date
+                          ? new Date(item.start_date).toLocaleString("pl-PL")
+                          : "Brak daty"}
+                        {" · "}
+                        {item.attendance_count ?? 0} uczestników
+                      </p>
+                      <p className="mt-1 text-[10px] text-muted-foreground">
+                        Status: {item.status || "—"} · Organizator: {item.organizer_name || "—"}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={eventsBusy === item.id}
+                      onClick={() => deleteManagedEvent(item)}
+                      className="shrink-0 rounded-xl border border-destructive/50 px-3 py-2 text-xs font-semibold text-destructive disabled:opacity-50"
+                    >
+                      {eventsBusy === item.id ? "Usuwanie..." : "Usuń wydarzenie"}
+                    </button>
+                  </div>
+                </article>
+              ))}
             </div>
           </section>
         )}

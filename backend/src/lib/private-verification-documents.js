@@ -183,6 +183,32 @@ export async function getPrivateVerificationDocument(token, userId) {
   return { filePath, metadata };
 }
 
+
+export async function deletePrivateVerificationDocument(token, userId) {
+  const match = /^private-doc:([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i
+    .exec(String(token || ""));
+
+  if (!match || !userId) {
+    throw new Error("Nieprawidłowy identyfikator dokumentu");
+  }
+
+  const { filePath, metadata } =
+    await getPrivateVerificationDocument(token, userId);
+
+  if (metadata.id !== match[1] || String(metadata.userId) !== String(userId)) {
+    throw new Error("Dokument nie należy do usuwanego użytkownika");
+  }
+
+  const metaPath = path.join(PRIVATE_DIR, match[1] + ".json");
+
+  // getPrivateVerificationDocument sprawdza katalog, metadane,
+  // właściciela, sygnaturę i bezpieczeństwo pliku.
+  await fs.rm(filePath, { force: false });
+  await fs.rm(metaPath, { force: false });
+
+  return true;
+}
+
 export async function extractPrivateVerificationDocument(token, userId) {
   const { filePath, metadata } =
     await getPrivateVerificationDocument(token, userId);

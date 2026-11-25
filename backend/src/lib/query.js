@@ -1,17 +1,24 @@
 import { badRequest } from "./errors.js";
 
-// Fields that hold arrays of strings. For those, a plain equality value means
-// "array contains value" (Base44 semantics: Conversation.filter({ members: me.id })).
-const ARRAY_FIELDS = new Set([
-  "species", "breeds", // Profile
-  "image_urls", // Listing
-  "photos", // Pet
-  "tags", // Post
-  "members", "member_names", // Conversation / Message
-  "badges", // Wallet
-]);
+// Array fields are model-specific: the same field name can have
+// different Prisma types in different models (e.g. Profile.species
+// is String[], while Listing.species and Pet.species are String?).
+const ARRAY_FIELDS_BY_ENTITY = Object.freeze({
+  profile: new Set(["species", "breeds", "gallery_urls"]),
+  listing: new Set(["image_urls", "video_urls"]),
+  pet: new Set(["photos"]),
+  post: new Set(["image_urls", "tags"]),
+  conversation: new Set(["members", "member_names"]),
+  message: new Set(["members"]),
+  wallet: new Set(["badges"]),
+  story: new Set(["viewers"]),
+});
 
-function valueToPrisma(field, value) {
+function isArrayField(entity, field) {
+  return ARRAY_FIELDS_BY_ENTITY[entity]?.has(field) ?? false;
+}
+
+function valueToPrisma(entity, field, value) {
   if (value !== null && typeof value === "object" && !Array.isArray(value)) {
     const out = {};
     for (const [op, opValue] of Object.entries(value)) {
@@ -28,7 +35,7 @@ function valueToPrisma(field, value) {
           out.contains = String(opValue);
           break;
         case "$ne":
-          out.not = ARRAY_FIELDS.has(field) ? { has: opValue } : opValue;
+          out.not = isArrayField(entity, field) ? { has: opValue } : opValue;
           break;
         case "$gt": out.gt = opValue; break;
         case "$gte": out.gte = opValue; break;
@@ -40,27 +47,27 @@ function valueToPrisma(field, value) {
     }
     return out;
   }
-  if (ARRAY_FIELDS.has(field)) return { has: value };
+  if (isArrayField(entity, field)) return { has: value };
   return value;
 }
 
 // Base44-style where → Prisma where. Supports $or / $and at any level.
-export function buildWhere(where) {
+export function buildWhere(where, entity) {
   if (!where || typeof where !== "object") return {};
   const out = {};
   for (const [key, value] of Object.entries(where)) {
     if (key === "$or") {
       if (!Array.isArray(value)) throw badRequest("$or expects an array");
-      out.OR = value.map((sub) => buildWhere(sub));
+      out.OR = value.map((sub) => buildWhere(sub, entity));
       continue;
     }
     if (key === "$and") {
       if (!Array.isArray(value)) throw badRequest("$and expects an array");
-      out.AND = value.map((sub) => buildWhere(sub));
+      out.AND = value.map((sub) => buildWhere(sub, entity));
       continue;
     }
     if (key.startsWith("$")) throw badRequest(`Unsupported filter operator "${key}"`);
-    out[key] = valueToPrisma(key, value);
+    out[key] = valueToPrisma(entity, key, value);
   }
   return out;
 }

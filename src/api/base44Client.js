@@ -294,8 +294,8 @@ export const functions = {
 
 export const social = {
   events: (city) => request(`/api/social/events${city ? `?city=${encodeURIComponent(city)}` : ""}`),
-  createEvent: (body) => request("/api/social/events", { method: "POST", body }),
-  buyTicket: (id) => request(`/api/social/events/${id}/ticket`, { method: "POST", body: {} }),
+  joinEvent: (id) => request(`/api/social/events/${encodeURIComponent(id)}/attendance`, { method: "POST", body: {} }),
+  leaveEvent: (id) => request(`/api/social/events/${encodeURIComponent(id)}/attendance`, { method: "DELETE" }),
   groups: (type) => request(`/api/social/groups${type && type !== "all" ? `?type=${encodeURIComponent(type)}` : ""}`),
   createGroup: (body) => request("/api/social/groups", { method: "POST", body }),
   joinGroup: (id) => request(`/api/social/groups/${id}/join`, { method: "POST", body: {} }),
@@ -377,6 +377,8 @@ export const reportsApi = {
 
 export const adminApi = {
   overview: () => request("/api/admin/overview"),
+  events: () => request("/api/admin/events"),
+  deleteEvent: (id) => request(`/api/admin/events/${encodeURIComponent(id)}`, { method: "DELETE" }),
   audit: (take = 100) => request(`/api/admin/audit?take=${encodeURIComponent(take)}`),
   moderatorStats: () => request("/api/admin/moderator-stats"),
   reports: () => request("/api/admin/reports"),
@@ -392,7 +394,8 @@ export const adminApi = {
   reviewListing: (id, body) => request(`/api/admin/listings/${id}`, { method: "POST", body }),
   reviewPost: (id, body) => request(`/api/admin/posts/${id}`, { method: "POST", body }),
   users: (q) => request(`/api/admin/users${q ? `?q=${encodeURIComponent(q)}` : ""}`),
-  updateUser: (id, body) => request(`/api/admin/users/${id}`, { method: "PATCH", body }),
+  updateUser: (id, body) => request(`/api/admin/users/${id}`, { method: "PATCH", body }),  deleteUser: (id, confirm_email) => request(`/api/admin/users/${encodeURIComponent(id)}/delete`, { method: "DELETE", body: { confirm_email } }),
+
   analyzeVerification: (id) => request("/api/ai/verify-breeder", { method: "POST", body: { id } }),
   getVerificationDocument: (id) => requestBlob(`/api/admin/verification/${encodeURIComponent(id)}/document`),
   resolveReport: (id, body) => request(`/api/admin/reports/${id}`, { method: "POST", body }),

@@ -11,7 +11,7 @@ import { isPremium } from "./premium.routes.js";
 import { config } from "../config.js";
 import { uploadRoot, privateRoot } from "./uploads.routes.js";
 import { listModerationQueue, publishQuarantinedImage, rejectQuarantinedImage } from "../lib/expurr-moderation.js";
-import { getPrivateVerificationDocument } from "../lib/private-verification-documents.js";
+import { getPrivateVerificationDocument, deletePrivateVerificationDocument } from "../lib/private-verification-documents.js";
 
 export const adminRouter = Router();
 
@@ -165,6 +165,394 @@ adminRouter.get(
         coins: wallets.find((w) => w.user_id === u.id)?.coins ?? 0,
         profile_verified: profiles.find((p) => p.user_id === u.id)?.verified ?? false,
       })),
+    });
+  })
+);
+
+
+// DELETE /api/admin/users/:id/delete — trwałe usunięcie konta.
+// Dostęp: wyłącznie administrator główny.
+adminRouter.delete(
+  "/users/:id/delete",
+  requireMainAdmin,
+  asyncHandler(async (req, res) => {
+    const userId = String(req.params.id || "");
+    const confirmation = String(req.body?.confirm_email || "").trim().toLowerCase();
+
+    if (!userId) throw badRequest("Brak identyfikatora konta");
+
+    const target = await prisma.user.findUnique({
+      where: { id: userId },
+    });
+
+    if (!target) throw notFound("Nie znaleziono konta");
+
+    if (target.id === req.user.id) {
+      throw forbidden("Nie możesz usunąć własnego konta administratora");
+    }
+
+    if (target.role === "admin") {
+      throw forbidden("Konta administratorów są chronione");
+    }
+
+    if (!confirmation || confirmation !== String(target.email).trim().toLowerCase()) {
+      throw badRequest("Adres e-mail nie jest zgodny z usuwanym kontem");
+    }
+
+    // Najpierw pobieramy dokumenty i subskrypcje.
+    const [verificationRows, subscriptions, ownedPets, ownedGroups, ownedEvents] =
+      await Promise.all([
+        prisma.verificationRequest.findMany({
+          where: { user_id: userId },
+          select: { document_url: true },
+        }),
+        prisma.subscription.findMany({
+          where: { user_id: userId },
+        }),
+        prisma.pet.findMany({
+          where: { owner_id: userId },
+          select: { id: true },
+        }),
+        prisma.group.findMany({
+          where: { created_by_id: userId },
+          select: { id: true },
+        }),
+        prisma.event.findMany({
+          where: { organizer_id: userId },
+          select: { id: true },
+        }),
+      ]);
+
+    // Anulowanie Stripe musi zakończyć się powodzeniem przed kasowaniem konta.
+    const stripeSubscriptions = subscriptions.filter(
+      (item) =>
+        item.stripe_subscription_id &&
+        ["active", "past_due"].includes(item.status)
+    );
+
+    if (stripeSubscriptions.length && !config.stripeSecret) {
+      throw badRequest("Nie można usunąć konta: Stripe nie jest skonfigurowany");
+    }
+
+    for (const item of stripeSubscriptions) {
+      const response = await fetch(
+        "https://api.stripe.com/v1/subscriptions/" +
+          encodeURIComponent(item.stripe_subscription_id),
+        {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${config.stripeSecret}`,
+          },
+        }
+      );
+
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        console.error("[admin account deletion] Stripe cancellation failed:", payload?.error?.message);
+        throw badRequest(
+          "Nie udało się anulować subskrypcji Stripe. Konto nie zostało usunięte."
+        );
+      }
+    }
+
+    const petIds = ownedPets.map((item) => item.id);
+    const groupIds = ownedGroups.map((item) => item.id);
+    const eventIds = ownedEvents.map((item) => item.id);
+
+    const ownedPosts = await prisma.post.findMany({
+      where: {
+        OR: [
+          { author_id: userId },
+          { created_by_id: userId },
+          ...(groupIds.length ? [{ group_id: { in: groupIds } }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+
+    const postIds = ownedPosts.map((item) => item.id);
+
+    const ownedStories = await prisma.story.findMany({
+      where: { author_id: userId },
+      select: { id: true },
+    });
+    const storyIds = ownedStories.map((item) => item.id);
+
+    const ownedListings = await prisma.listing.findMany({
+      where: {
+        OR: [{ seller_id: userId }, { created_by_id: userId }],
+      },
+      select: { id: true },
+    });
+    const listingIds = ownedListings.map((item) => item.id);
+
+    const ownedComments = await prisma.comment.findMany({
+      where: {
+        OR: [
+          { author_id: userId },
+          ...(postIds.length ? [{ post_id: { in: postIds } }] : []),
+        ],
+      },
+      select: { id: true },
+    });
+    const commentIds = ownedComments.map((item) => item.id);
+
+    const ownedMessages = await prisma.message.findMany({
+      where: { sender_id: userId },
+      select: { id: true },
+    });
+    const messageIds = ownedMessages.map((item) => item.id);
+
+    // Dokumenty prywatne usuwamy dopiero po zatwierdzeniu transakcji DB.
+    const privateDocuments = verificationRows
+      .map((item) => item.document_url)
+      .filter((item) => typeof item === "string" && item.startsWith("private-doc:"));
+
+    await prisma.$transaction(async (tx) => {
+      // Dziennik audytowy jest zapisywany w tej samej transakcji.
+      await tx.adminAuditLog.create({
+        data: {
+          actor_id: String(req.user.id),
+          actor_role: String(req.user.role || "admin"),
+          action: "user.delete",
+          target_type: "user",
+          target_id: userId,
+          summary: ("Usunięto konto " + target.email).slice(0, 300),
+        },
+      });
+
+      // Reakcje i relacje społecznościowe.
+      await tx.messageReaction.deleteMany({
+        where: { OR: [{ user_id: userId }, ...(messageIds.length ? [{ message_id: { in: messageIds } }] : [])] },
+      });
+      await tx.storyReaction.deleteMany({
+        where: {
+          OR: [
+            { user_id: userId },
+            ...(storyIds.length ? [{ story_id: { in: storyIds } }] : []),
+          ],
+        },
+      });
+      await tx.like.deleteMany({
+        where: {
+          OR: [
+            { user_id: userId },
+            ...(postIds.length ? [{ post_id: { in: postIds } }] : []),
+          ],
+        },
+      });
+      await tx.follow.deleteMany({
+        where: {
+          OR: [{ follower_id: userId }, { following_id: userId }],
+        },
+      });
+
+      // Własne wiadomości usuwamy, ale rozmowy zachowujemy.
+      await tx.message.deleteMany({ where: { sender_id: userId } });
+
+      const conversations = await tx.conversation.findMany({
+        where: { members: { has: userId } },
+      });
+
+      for (const conversation of conversations) {
+        const index = conversation.members.indexOf(userId);
+        const members = conversation.members.filter((id) => id !== userId);
+        const memberNames = conversation.member_names.filter((_, i) => i !== index);
+
+        await tx.conversation.update({
+          where: { id: conversation.id },
+          data: {
+            members,
+            member_names: memberNames,
+            ...(conversation.last_sender_id === userId
+              ? { last_sender_id: null, last_message: null }
+              : {}),
+          },
+        });
+      }
+
+      const messagesWithMembership = await tx.message.findMany({
+        where: { members: { has: userId } },
+        select: { id: true, members: true },
+      });
+
+      for (const message of messagesWithMembership) {
+        await tx.message.update({
+          where: { id: message.id },
+          data: { members: message.members.filter((id) => id !== userId) },
+        });
+      }
+
+      // Stories innych użytkowników pozostają, usuwamy tylko widza.
+      const storiesViewed = await tx.story.findMany({
+        where: { viewers: { has: userId } },
+        select: { id: true, viewers: true },
+      });
+
+      for (const story of storiesViewed) {
+        await tx.story.update({
+          where: { id: story.id },
+          data: { viewers: story.viewers.filter((id) => id !== userId) },
+        });
+      }
+
+      await tx.story.deleteMany({ where: { author_id: userId } });
+
+      // Komentarze i posty.
+      await tx.comment.deleteMany({
+        where: {
+          OR: [
+            { author_id: userId },
+            { created_by_id: userId },
+            ...(postIds.length ? [{ post_id: { in: postIds } }] : []),
+          ],
+        },
+      });
+      await tx.post.deleteMany({
+        where: {
+          OR: [{ author_id: userId }, { created_by_id: userId },
+            ...(groupIds.length ? [{ group_id: { in: groupIds } }] : [])],
+        },
+      });
+
+      // Ogłoszenia, grupy i wydarzenia.
+      await tx.listing.deleteMany({
+        where: {
+          OR: [{ seller_id: userId }, { created_by_id: userId }],
+        },
+      });
+
+      if (groupIds.length) {
+        await tx.groupMember.deleteMany({ where: { group_id: { in: groupIds } } });
+        await tx.group.deleteMany({ where: { id: { in: groupIds } } });
+      }
+      await tx.groupMember.deleteMany({ where: { user_id: userId } });
+
+      await tx.eventAttendance.deleteMany({ where: { user_id: userId } });
+      if (eventIds.length) {
+        await tx.eventAttendance.deleteMany({ where: { event_id: { in: eventIds } } });
+        await tx.eventTicket.deleteMany({ where: { event_id: { in: eventIds } } });
+        await tx.event.deleteMany({ where: { id: { in: eventIds } } });
+      }
+      await tx.eventTicket.deleteMany({ where: { user_id: userId } });
+
+      // Zwierzęta i ich dokumentacja.
+      if (petIds.length) {
+        await tx.petHealthRecord.deleteMany({ where: { pet_id: { in: petIds } } });
+        await tx.petMeasurement.deleteMany({ where: { pet_id: { in: petIds } } });
+        await tx.petCalendarEvent.deleteMany({ where: { pet_id: { in: petIds } } });
+        await tx.petAchievement.deleteMany({ where: { pet_id: { in: petIds } } });
+        await tx.petCaregiver.deleteMany({ where: { pet_id: { in: petIds } } });
+        await tx.pet.deleteMany({ where: { id: { in: petIds } } });
+      }
+
+      await tx.petCaregiver.deleteMany({ where: { user_id: userId } });
+      await tx.petCaregiver.updateMany({
+        where: { invited_by: userId },
+        data: { invited_by: null },
+      });
+
+      // Pozostałe wpisy utworzone przez użytkownika, ale należące do innych.
+      await tx.petHealthRecord.updateMany({
+        where: { created_by_id: userId },
+        data: { created_by_id: null },
+      });
+      await tx.petMeasurement.updateMany({
+        where: { created_by_id: userId },
+        data: { created_by_id: null },
+      });
+      await tx.petCalendarEvent.updateMany({
+        where: { created_by_id: userId },
+        data: { created_by_id: null },
+      });
+      await tx.petAchievement.updateMany({
+        where: { confirmed_by: userId },
+        data: { confirmed_by: null },
+      });
+      await tx.petAchievement.updateMany({
+        where: { created_by_id: userId },
+        data: { created_by_id: null },
+      });
+
+      // Weryfikacja hodowcy, powiadomienia, gry, portfel, klucze i OTP.
+      await tx.verificationRequest.deleteMany({ where: { user_id: userId } });
+      await tx.notification.deleteMany({ where: { user_id: userId } });
+      await tx.notification.updateMany({
+        where: { created_by_id: userId },
+        data: { created_by_id: null },
+      });
+      await tx.gameScore.deleteMany({ where: { user_id: userId } });
+      await tx.redemption.deleteMany({ where: { user_id: userId } });
+      await tx.e2eKey.deleteMany({ where: { user_id: userId } });
+      await tx.otpCode.deleteMany({ where: { email: target.email } });
+      await tx.wallet.deleteMany({ where: { user_id: userId } });
+
+      // Audio dodane przez użytkownika; wpisy systemowe zostają.
+      await tx.reelAudio.deleteMany({ where: { created_by_id: userId } });
+
+      // Raporty wysłane przez użytkownika lub dotyczące usuwanych treści.
+      const reportTargets = [
+        { target_type: "user", target_id: userId },
+        ...postIds.map((id) => ({ target_type: "post", target_id: id })),
+        ...commentIds.map((id) => ({ target_type: "comment", target_id: id })),
+        ...listingIds.map((id) => ({ target_type: "listing", target_id: id })),
+        ...storyIds.map((id) => ({ target_type: "story", target_id: id })),
+      ];
+
+      await tx.report.deleteMany({
+        where: {
+          OR: [
+            { reporter_id: userId },
+            ...(reportTargets.length ? [{ OR: reportTargets }] : []),
+          ],
+        },
+      });
+
+      // Wizyty profilu.
+      await tx.profileVisit.deleteMany({
+        where: {
+          OR: [
+            { profile_user_id: userId },
+            { visitor_id: userId },
+            { created_by_id: userId },
+          ],
+        },
+      });
+
+      // Anonimizacja historii finansowej — rekordy pozostają.
+      await tx.coinPurchase.updateMany({
+        where: { user_id: userId },
+        data: { user_id: "anonymized" },
+      });
+      await tx.subscription.updateMany({
+        where: { user_id: userId },
+        data: { user_id: "anonymized", status: "canceled" },
+      });
+
+      // Profil i konto na końcu.
+      await tx.profile.deleteMany({ where: { user_id: userId } });
+      await tx.user.delete({ where: { id: userId } });
+    });
+
+    // Usuwanie prywatnych dokumentów po udanym zatwierdzeniu transakcji.
+    // Błąd dokumentu nie przywraca już usuniętego konta.
+    const documentCleanupErrors = [];
+
+    for (const token of privateDocuments) {
+      try {
+        await deletePrivateVerificationDocument(token, userId);
+      } catch (error) {
+        documentCleanupErrors.push(String(error?.message || "Błąd usuwania dokumentu"));
+        console.error("[admin account deletion] private document cleanup failed:", error?.message);
+      }
+    }
+
+    res.json({
+      ok: true,
+      deleted: true,
+      private_documents_removed: privateDocuments.length - documentCleanupErrors.length,
+      private_document_cleanup_errors: documentCleanupErrors.length,
     });
   })
 );
@@ -996,6 +1384,78 @@ reportsRouter.post(
         "[Expurr report analysis] Błąd zadania:",
         error?.message || error
       );
+    });
+  })
+);
+
+
+// Katalog wydarzeń — dostęp wyłącznie dla administratora głównego.
+adminRouter.get(
+  "/events",
+  requireMainAdmin,
+  asyncHandler(async (_req, res) => {
+    const items = await prisma.event.findMany({
+      orderBy: { start_date: "asc" },
+      take: 500,
+    });
+
+    const ids = items.map((item) => item.id);
+    const counts = ids.length
+      ? await prisma.eventAttendance.groupBy({
+          by: ["event_id"],
+          where: { event_id: { in: ids } },
+          _count: { _all: true },
+        })
+      : [];
+
+    const attendance = Object.fromEntries(
+      counts.map((row) => [row.event_id, row._count._all])
+    );
+
+    res.json({
+      items: items.map((item) => ({
+        ...item,
+        price_coins: 0,
+        attendance_count: attendance[item.id] ?? 0,
+      })),
+    });
+  })
+);
+
+// Usuwanie wydarzenia — administrator główny.
+// EventTicket pozostaje zachowany jako historyczny zapis transakcji.
+adminRouter.delete(
+  "/events/:id",
+  requireMainAdmin,
+  asyncHandler(async (req, res) => {
+    const event = await prisma.event.findUnique({
+      where: { id: req.params.id },
+    });
+
+    if (!event) throw notFound("Nie znaleziono wydarzenia");
+
+    await prisma.$transaction(async (tx) => {
+      await tx.eventAttendance.deleteMany({
+        where: { event_id: event.id },
+      });
+
+      await tx.event.delete({
+        where: { id: event.id },
+      });
+    });
+
+    await writeAdminAudit(
+      req,
+      "delete",
+      "event",
+      event.id,
+      event.title
+    );
+
+    res.json({
+      deleted: true,
+      id: event.id,
+      historical_tickets_preserved: true,
     });
   })
 );

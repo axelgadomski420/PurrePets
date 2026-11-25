@@ -132,8 +132,7 @@ export const ENTITIES = {
         : user
           ? { OR: [{ status: "published" }, { created_by_id: user.id }] }
           : { status: "published" },
-    write: "ownerOrAdmin",
-    forcedCreate: (user) => ({ organizer_id: user.id, status: "published" }),
+    write: "serviceOnly",
   },
   EventTicket: {
     delegate: "eventTicket",

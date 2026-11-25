@@ -126,7 +126,7 @@ entitiesRouter.post(
     const entity = resolve(req);
     const body = querySchema.parse(req.body ?? {});
     const scope = baseReadWhere(entity, req);
-    const where = { ...scope, AND: [...(scope.AND ?? []), buildWhere(body.where)] };
+    const where = { ...scope, AND: [...(scope.AND ?? []), buildWhere(body.where, entity.delegate)] };
     await maybeEnsureWallet(entity, req, where);
     const items = await prisma[entity.delegate].findMany({
       where,
@@ -145,7 +145,7 @@ entitiesRouter.post(
     const entity = resolve(req);
     const body = querySchema.pick({ where: true }).parse(req.body ?? {});
     const scope = baseReadWhere(entity, req);
-    const where = { ...scope, AND: [...(scope.AND ?? []), buildWhere(body.where)] };
+    const where = { ...scope, AND: [...(scope.AND ?? []), buildWhere(body.where, entity.delegate)] };
     const count = await prisma[entity.delegate].count({ where });
     res.json(count);
   })

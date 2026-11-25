@@ -161,6 +161,12 @@ async function creditSession(session) {
   const coins = Number(session?.metadata?.coins);
   const packageId = session?.metadata?.package_id || "custom";
   if (!sessionId || !userId || !Number.isFinite(coins) || coins <= 0) return null;
+  const account = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true },
+  });
+  if (!account) return null;
+
   const existing = await prisma.coinPurchase.findUnique({ where: { stripe_session_id: sessionId } });
   if (existing) return { sessionId, coins, duplicate: true };
   const amount = Number(session.amount_total ?? 0);
@@ -185,6 +191,12 @@ async function activatePro(session) {
   const userId = session?.metadata?.user_id || session?.client_reference_id;
   const plan = session?.metadata?.plan === "year" ? "year" : "month";
   if (!userId) return null;
+  const account = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { id: true },
+  });
+  if (!account) return null;
+
   const existing = await prisma.subscription.findUnique({ where: { stripe_session_id: session.id } });
   if (existing) return existing;
 
@@ -227,7 +239,16 @@ async function handleInvoicePaid(invoice) {
     where: { id: sub.id },
     data: { status: "active", current_period_end: periodEnd },
   });
-  await prisma.user.update({ where: { id: sub.user_id }, data: { is_premium: true, premium_until: periodEnd } });
+  const account = await prisma.user.findUnique({
+    where: { id: sub.user_id },
+    select: { id: true },
+  });
+  if (account) {
+    await prisma.user.update({
+      where: { id: account.id },
+      data: { is_premium: true, premium_until: periodEnd },
+    });
+  }
   return sub;
 }
 
@@ -242,21 +263,30 @@ async function handleSubscriptionDeleted(subscription) {
     orderBy: { current_period_end: "desc" },
   });
   const anotherActive = activeSubs.find((item) => item.stripe_subscription_id !== subId);
-  await prisma.user.update({
+  const account = await prisma.user.findUnique({
     where: { id: sub.user_id },
-    data: {
-      is_premium: Boolean(anotherActive),
-      premium_until: anotherActive?.current_period_end ?? null,
-    },
+    select: { id: true },
   });
-  if (!anotherActive) {
-    await notify(sub.user_id, {
-      type: "system",
-      title: "Subskrypcja PRO wygasła",
-      body: "Twoja subskrypcja Purre Pets PRO została zakończona. Odnów ją w sekcji Premium.",
-      link: "/rewards",
+
+  if (account) {
+    await prisma.user.update({
+      where: { id: account.id },
+      data: {
+        is_premium: Boolean(anotherActive),
+        premium_until: anotherActive?.current_period_end ?? null,
+      },
     });
+
+    if (!anotherActive) {
+      await notify(sub.user_id, {
+        type: "system",
+        title: "Subskrypcja PRO wygasła",
+        body: "Twoja subskrypcja Purre Pets PRO została zakończona. Odnów ją w sekcji Premium.",
+        link: "/rewards",
+      });
+    }
   }
+
   return sub;
 }
 

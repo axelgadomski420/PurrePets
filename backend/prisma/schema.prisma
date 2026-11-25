@@ -346,6 +346,21 @@ model EventTicket {
   @@map("event_tickets")
 }
 
+
+model EventAttendance {
+  id            String   @id @default(cuid())
+  event_id      String
+  user_id       String
+  user_name     String?
+  created_by_id String?
+  created_date  DateTime @default(now())
+  updated_date  DateTime @updatedAt
+
+  @@unique([event_id, user_id])
+  @@index([user_id])
+  @@map("event_attendance")
+}
+
 model Group {
   id            String   @id @default(cuid())
   name          String

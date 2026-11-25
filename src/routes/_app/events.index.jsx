@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { AuthGateError, requireSignedIn } from "@/components/auth/AuthGate";
-import { CalendarDays, MapPin, Ticket } from "lucide-react";
+import { CalendarDays, MapPin, Users } from "lucide-react";
 import { toast } from "sonner";
 import TopBar from "@/components/layout/TopBar";
 import { base44 } from "@/api/base44Client";
@@ -16,47 +16,7 @@ export const Route = createFileRoute("/_app/events/")({
   component: EventsPage,
 });
 
-const RADAR = [
-  {
-    id: "radar-waw",
-    title: "Międzynarodowa Wystawa Kotów",
-    description: "Ringuje FIFE. Bilety dla publiczności za PURRE Coins.",
-    city: "Warszawa",
-    location: "Ptak Warsaw Expo",
-    start_date: new Date(Date.now() + 1000 * 60 * 60 * 24 * 18).toISOString(),
-    price_coins: 40,
-    organizer_name: "PURRE PETS",
-    going: 86,
-    has_ticket: false,
-    offline: true,
-  },
-  {
-    id: "radar-krk",
-    title: "Zuchwała Wystawa Psów",
-    description: "Open show, ocena szczeniąt i spotkanie klubów rasowych.",
-    city: "Kraków",
-    location: "Tauron Arena",
-    start_date: new Date(Date.now() + 1000 * 60 * 60 * 24 * 32).toISOString(),
-    price_coins: 0,
-    organizer_name: "PURRE PETS",
-    going: 54,
-    has_ticket: false,
-    offline: true,
-  },
-  {
-    id: "radar-wro",
-    title: "Targi PURRE",
-    description: "Hodowle, żywienie i adopcje.",
-    city: "Wrocław",
-    location: "Hala Stulecia",
-    start_date: new Date(Date.now() + 1000 * 60 * 60 * 24 * 46).toISOString(),
-    price_coins: 80,
-    organizer_name: "PURRE PETS",
-    going: 120,
-    has_ticket: false,
-    offline: true,
-  },
-];
+
 
 function formatWhen(value) {
   const date = new Date(value);
@@ -72,15 +32,6 @@ function EventsPage() {
   const [loadError, setLoadError] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
-  const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({
-    title: "",
-    city: "Warszawa",
-    location: "",
-    start_date: "",
-    price_coins: 0,
-    description: "",
-  });
 
   const load = () => {
     setLoading(true);
@@ -96,7 +47,7 @@ function EventsPage() {
         // problemie sieciowym. Błędy HTTP nie mogą być maskowane.
         if (error?.name === "ApiNetworkError") {
           setOffline(true);
-          setEvents(RADAR.filter((event) => !city || event.city === city));
+          setEvents([]);
           return;
         }
 
@@ -124,54 +75,29 @@ function EventsPage() {
 
   const visible = useMemo(() => events, [events]);
 
-  const buy = async (event) => {
-    if (event.offline) {
-      toast.error("Bilety ruszą po aktualizacji bazy (prisma db push).");
-      return;
-    }
+  const toggleAttendance = async (event) => {
     if (!isAuthenticated) {
       navigateToLogin();
       return;
     }
+
     setBusy(event.id);
     try {
-      const result = await base44.social.buyTicket(event.id);
-      toast.success(result.already ? "Masz już bilet" : `Bilet zapisany · ${result.coins_paid} monet`);
-      load();
+      if (event.current_user_attending) {
+        await base44.social.leaveEvent(event.id);
+        toast.success("Zrezygnowano z udziału");
+      } else {
+        await base44.social.joinEvent(event.id);
+        toast.success("Dodano Cię do uczestników wydarzenia");
+      }
+      await load();
     } catch (error) {
-      toast.error(error?.message ?? "Nie udało się kupić biletu");
+      toast.error(error?.message ?? "Nie udało się zmienić udziału");
     } finally {
       setBusy("");
     }
   };
 
-  const create = async (submitEvent) => {
-    submitEvent.preventDefault();
-    if (!isAuthenticated) {
-      navigateToLogin();
-      return;
-    }
-    setBusy("create");
-    try {
-      await base44.social.createEvent({
-        title: form.title,
-        city: form.city,
-        location: form.location || undefined,
-        description: form.description || undefined,
-        price_coins: Number(form.price_coins) || 0,
-        start_date: new Date(form.start_date).toISOString(),
-      });
-      toast.success("Wydarzenie jest w radarze");
-      setOpen(false);
-      setForm({ title: "", city: form.city, location: "", start_date: "", price_coins: 0, description: "" });
-      setCity("");
-      load();
-    } catch (error) {
-      toast.error(error?.message ?? "Nie udało się dodać wydarzenia");
-    } finally {
-      setBusy("");
-    }
-  };
 
   return (
     <div>
@@ -184,16 +110,9 @@ function EventsPage() {
               <span className="aura-text">Wydarzenia</span>
             </h1>
             <p className="mt-2 max-w-xl text-sm text-muted-foreground">
-              Wystawy, targi i spotkania hodowców. Bilet schodzi z PURRE Coins — bez wypłat i bez hazardu.
+              Oficjalne wystawy kotów i psów w systemach WCF, TICA, FPL/FIFe i FCI.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setOpen((value) => !value)}
-            className="btn-aura rounded-xl px-4 py-2.5 text-[10px] font-semibold uppercase tracking-[0.18em]"
-          >
-            Dodaj wydarzenie
-          </button>
         </div>
 
         <div className="mt-5 flex gap-2 overflow-x-auto pb-1">
@@ -218,7 +137,7 @@ function EventsPage() {
 
         {offline && (
           <p className="mt-4 rounded-xl border border-chart-4/40 bg-chart-4/10 px-3 py-2 text-[11px] text-muted-foreground">
-            Brak połączenia z serwerem. Poniżej pokazano przykładowe wydarzenia — nie są to aktualne oferty, a zakup biletów i publikacja są chwilowo niedostępne.
+            Brak połączenia z serwerem. Nie można teraz pobrać wydarzeń. Spróbuj ponownie później.
           </p>
         )}
 
@@ -239,77 +158,6 @@ function EventsPage() {
           </div>
         )}
 
-        {open && (
-          <form onSubmit={create} className="mt-4 grid gap-3 rounded-[var(--radius)] border border-border/70 bg-card/60 p-4 sm:grid-cols-2">
-            <label className="text-[11px] text-muted-foreground sm:col-span-2">
-              Tytuł
-              <input
-                required
-                minLength={3}
-                value={form.title}
-                onChange={(event) => setForm({ ...form, title: event.target.value })}
-                className="mt-1 w-full rounded-xl border border-border/70 bg-background/40 px-3 py-2 text-sm text-foreground"
-              />
-            </label>
-            <label className="text-[11px] text-muted-foreground">
-              Miasto
-              <select
-                value={form.city}
-                onChange={(event) => setForm({ ...form, city: event.target.value })}
-                className="mt-1 w-full rounded-xl border border-border/70 bg-background/40 px-3 py-2 text-sm text-foreground"
-              >
-                {CITY_NAMES.map((name) => (
-                  <option key={name}>{name}</option>
-                ))}
-              </select>
-            </label>
-            <label className="text-[11px] text-muted-foreground">
-              Start
-              <input
-                required
-                type="datetime-local"
-                value={form.start_date}
-                onChange={(event) => setForm({ ...form, start_date: event.target.value })}
-                className="mt-1 w-full rounded-xl border border-border/70 bg-background/40 px-3 py-2 text-sm text-foreground"
-              />
-            </label>
-            <label className="text-[11px] text-muted-foreground">
-              Miejsce
-              <input
-                value={form.location}
-                onChange={(event) => setForm({ ...form, location: event.target.value })}
-                className="mt-1 w-full rounded-xl border border-border/70 bg-background/40 px-3 py-2 text-sm text-foreground"
-              />
-            </label>
-            <label className="text-[11px] text-muted-foreground">
-              Bilet (monety)
-              <input
-                type="number"
-                min={0}
-                max={20000}
-                value={form.price_coins}
-                onChange={(event) => setForm({ ...form, price_coins: event.target.value })}
-                className="mt-1 w-full rounded-xl border border-border/70 bg-background/40 px-3 py-2 text-sm text-foreground"
-              />
-            </label>
-            <label className="text-[11px] text-muted-foreground sm:col-span-2">
-              Opis
-              <textarea
-                value={form.description}
-                onChange={(event) => setForm({ ...form, description: event.target.value })}
-                className="mt-1 min-h-20 w-full rounded-xl border border-border/70 bg-background/40 px-3 py-2 text-sm text-foreground"
-              />
-            </label>
-            <button
-              type="submit"
-              disabled={busy === "create"}
-              className="btn-aura rounded-xl py-2.5 text-[10px] font-semibold uppercase tracking-[0.18em] sm:col-span-2"
-            >
-              {busy === "create" ? "Zapis…" : "Opublikuj w radarze"}
-            </button>
-          </form>
-        )}
-
         <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
           {loading && <p className="text-sm text-muted-foreground">Ładowanie radaru…</p>}
           {!loading && visible.length === 0 && (
@@ -327,18 +175,23 @@ function EventsPage() {
                 {event.city}
               </p>
               {event.description && <p className="mt-3 text-sm text-muted-foreground">{event.description}</p>}
-              <div className="mt-4 flex items-center justify-between gap-3">
-                <span className="text-[11px] uppercase tracking-widest text-muted-foreground">
-                  {event.going ?? 0} idzie · {event.price_coins ? `${event.price_coins} monet` : "wstęp wolny"}
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <span className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-widest text-muted-foreground">
+                  <Users className="h-3.5 w-3.5" />
+                  {event.attendance_count ?? 0} uczestników
                 </span>
                 <button
                   type="button"
-                  disabled={busy === event.id || event.has_ticket}
-                  onClick={() => buy(event)}
-                  className="inline-flex items-center gap-1.5 rounded-xl bg-foreground px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-background disabled:opacity-60"
+                  disabled={busy === event.id}
+                  onClick={() => toggleAttendance(event)}
+                  aria-pressed={Boolean(event.current_user_attending)}
+                  className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.16em] disabled:opacity-60 ${
+                    event.current_user_attending
+                      ? "border border-border/70 text-foreground"
+                      : "bg-foreground text-background"
+                  }`}
                 >
-                  <Ticket className="h-3.5 w-3.5" />
-                  {event.has_ticket ? "Masz bilet" : "Bilet"}
+                  {event.current_user_attending ? "Rezygnuję" : "Wezmę udział"}
                 </button>
               </div>
             </article>
