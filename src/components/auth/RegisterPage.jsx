@@ -1,3 +1,4 @@
+import { useI18n } from "@/lib/i18n";
 import { Dog, Lock, Mail, UserPlus, Heart } from "lucide-react";
 import { useState } from "react";
 import { base44 } from "@/api/base44Client";
@@ -9,8 +10,8 @@ import { safeReturnTo } from "@/lib/authReturnTo";
 import { cn } from "@/lib/utils";
 
 const ACCOUNT_TYPES = [
-  { id: "breeder", label: "Hodowca", hint: "dodaję ogłoszenia", icon: Dog },
-  { id: "enthusiast", label: "Użytkownik", hint: "szukam zwierzaka", icon: Heart },
+  { id: "breeder", label: "auth.breeder", hint: "auth.breederHint", icon: Dog },
+  { id: "enthusiast", label: "auth.enthusiast", hint: "auth.enthusiastHint", icon: Heart },
 ];
 
 /**
@@ -18,6 +19,7 @@ const ACCOUNT_TYPES = [
  * od razu przekierowanie na /profile (bez ekranu onboarding).
  */
 export function RegisterPage() {
+  const { t } = useI18n();
   const returnTo = safeReturnTo();
   const [accountType, setAccountType] = useState("breeder");
   const [email, setEmail] = useState("");
@@ -37,29 +39,29 @@ export function RegisterPage() {
     e.preventDefault();
     setError("");
     if (password !== confirm) {
-      setError("Hasła nie są identyczne");
+      setError(t("auth.passwordMismatch"));
       return;
     }
     setBusy(true);
     try {
       const result = await base44.auth.register(email, password);
-      if (!result?.access_token) throw new Error("Backend nie zwrócił tokenu sesji");
+      if (!result?.access_token) throw new Error(t("auth.sessionTokenError"));
       finish(result.access_token);
     } catch (err) {
-      setError(err.message || "Rejestracja nie powiodła się");
+      setError(err.message || t("auth.registerError"));
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <AuthLayout icon={UserPlus} title="Załóż konto" subtitle="Dołącz do PURRE PETS">
+    <AuthLayout icon={UserPlus} title={t("auth.registerTitle")} subtitle={t("auth.registerSubtitle")}>
       <GoogleButton returnTo={returnTo} onError={setError} />
       <OrDivider />
       <AuthError>{error}</AuthError>
 
       <div className="mb-4">
-        <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">Rodzaj konta</p>
+        <p className="mb-2 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">{t("auth.accountType")}</p>
         <div className="grid grid-cols-2 gap-2">
           {ACCOUNT_TYPES.map((option) => {
             const Icon = option.icon;
@@ -76,8 +78,8 @@ export function RegisterPage() {
                 )}
               >
                 <Icon className={cn("h-4 w-4", selected ? "text-primary" : "text-muted-foreground")} />
-                <span className="text-xs font-semibold">{option.label}</span>
-                <span className="text-[10px] text-muted-foreground">{option.hint}</span>
+                <span className="text-xs font-semibold">{t(option.label)}</span>
+                <span className="text-[10px] text-muted-foreground">{t(option.hint)}</span>
               </button>
             );
           })}
@@ -86,34 +88,34 @@ export function RegisterPage() {
 
       <form onSubmit={register} className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="register-email">E-mail</Label>
+          <Label htmlFor="register-email">{t("auth.email")}</Label>
           <div className="relative">
             <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input id="register-email" type="email" autoComplete="email" autoFocus placeholder="ty@example.com" value={email} onChange={(e) => setEmail(e.target.value)} className="h-12 pl-10" disabled={busy} required />
           </div>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="register-password">Hasło</Label>
+          <Label htmlFor="register-password">{t("auth.password")}</Label>
           <div className="relative">
             <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input id="register-password" type="password" autoComplete="new-password" placeholder="••••••••" value={password} onChange={(e) => setPassword(e.target.value)} className="h-12 pl-10" disabled={busy} required />
           </div>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="register-confirm">Powtórz hasło</Label>
+          <Label htmlFor="register-confirm">{t("auth.confirmPassword")}</Label>
           <div className="relative">
             <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
             <Input id="register-confirm" type="password" autoComplete="new-password" placeholder="••••••••" value={confirm} onChange={(e) => setConfirm(e.target.value)} className="h-12 pl-10" disabled={busy} required />
           </div>
         </div>
-        <SubmitButton busy={busy} busyLabel="Tworzę konto...">
-          Załóż konto
+        <SubmitButton busy={busy} busyLabel={t("auth.creatingAccount")}>
+          {t("auth.registerButton")}
         </SubmitButton>
       </form>
       <p className="mt-6 text-center text-sm text-muted-foreground">
-        Masz już konto?{" "}
+        {t("auth.haveAccount")}{" "}
         <AuthLink to="/login" returnTo={returnTo}>
-          Zaloguj się
+          {t("auth.loginButton")}
         </AuthLink>
       </p>
     </AuthLayout>

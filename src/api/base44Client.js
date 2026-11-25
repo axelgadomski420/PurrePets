@@ -251,14 +251,6 @@ export const auth = {
   async register(email, password, fullName) {
     return request("/api/auth/register", { method: "POST", body: { email, password, full_name: fullName } });
   },
-  async verifyOtp(email, otpCode) {
-    const result = await request("/api/auth/verify-otp", { method: "POST", body: { email, otp_code: otpCode } });
-    if (result.access_token) auth.setToken(result.access_token);
-    return result;
-  },
-  async resendOtp(email) {
-    return request("/api/auth/resend-otp", { method: "POST", body: { email } });
-  },
   async logout() {
     try {
       await request("/api/auth/logout", { method: "POST" });

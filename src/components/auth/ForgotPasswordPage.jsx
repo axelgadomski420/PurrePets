@@ -1,3 +1,4 @@
+import { useI18n } from "@/lib/i18n";
 import { ArrowLeft, Mail } from "lucide-react";
 import { useState } from "react";
 import { base44 } from "@/api/base44Client";
@@ -10,6 +11,7 @@ import { safeReturnTo } from "@/lib/authReturnTo";
 // The /forgot-password page. Always ends in the generic "if an account exists"
 // message: the API does not reveal whether the email is registered, and neither should the UI.
 export function ForgotPasswordPage() {
+  const { t } = useI18n();
   const returnTo = safeReturnTo();
   const [email, setEmail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -29,27 +31,27 @@ export function ForgotPasswordPage() {
   }
 
   return (
-    <AuthLayout icon={Mail} title="Reset password" subtitle="We'll send you a link to reset it">
+    <AuthLayout icon={Mail} title={t("auth.forgotTitle")} subtitle={t("auth.forgotSubtitle")}>
       {sent ? (
-        <p className="text-center text-sm text-foreground">If an account exists with that email, you'll receive a password reset link shortly.</p>
+        <p className="text-center text-sm text-foreground">{t("auth.forgotSuccess")}</p>
       ) : (
         <form onSubmit={submit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="forgot-email">Email address</Label>
+            <Label htmlFor="forgot-email">{t("auth.email")}</Label>
             <div className="relative">
               <Mail className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
               <Input id="forgot-email" type="email" autoComplete="email" autoFocus placeholder="you@example.com" value={email} onChange={(e) => setEmail(e.target.value)} className="h-12 pl-10" required />
             </div>
           </div>
-          <SubmitButton busy={busy} busyLabel="Sending...">
-            Send reset link
+          <SubmitButton busy={busy} busyLabel={t("auth.sending")}>
+            {t("auth.sendResetLink")}
           </SubmitButton>
         </form>
       )}
       <p className="mt-6 text-center text-sm text-muted-foreground">
         <AuthLink to="/login" returnTo={returnTo}>
           <ArrowLeft className="mr-1 inline h-3 w-3" aria-hidden="true" />
-          Back to log in
+          {t("auth.backToLogin")}
         </AuthLink>
       </p>
     </AuthLayout>

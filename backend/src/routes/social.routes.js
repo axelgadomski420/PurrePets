@@ -81,7 +81,7 @@ socialRouter.get(
 
 socialRouter.get(
   "/events",
-  requireAuth,
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const city = typeof req.query.city === "string" ? req.query.city.trim() : "";
     const events = await prisma.event.findMany({
@@ -143,6 +143,24 @@ socialRouter.get(
                   },
                 ],
               },
+
+              {
+                AND: [
+                  {
+                    description: {
+                      startsWith: "FCI.",
+                      mode: "insensitive",
+                    },
+                  },
+                  {
+                    description: {
+                      contains:
+                        "Oficjalne źródło: https://fci.be/en/schedules/concours.aspx?iso=PL",
+                      mode: "insensitive",
+                    },
+                  },
+                ],
+              },
             ],
           },
         ],
@@ -159,7 +177,7 @@ socialRouter.get(
             _count: { _all: true },
           })
         : [],
-      ids.length
+      ids.length && req.user?.id
         ? prisma.eventAttendance.findMany({
             where: { user_id: req.user.id, event_id: { in: ids } },
             select: { event_id: true },

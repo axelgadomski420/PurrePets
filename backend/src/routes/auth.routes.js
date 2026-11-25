@@ -256,8 +256,7 @@ authRouter.get("/google/callback", async (req, res) => {
 });
 
 authRouter.post("/register", handleRegister);
-authRouter.post("/verify-otp", handleRegister);
-authRouter.post("/resend-otp", (_req, res) => res.json({ ok: true }));
+
 authRouter.post("/login", handleLogin);
 authRouter.post("/", handleLogin);
 authRouter.get("/me", handleMe);

@@ -1,8 +1,9 @@
+import { useI18n } from "@/lib/i18n";
 import { Link } from "@tanstack/react-router";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GoogleIcon } from "./GoogleIcon";
-import { signInWithProvider } from "@/lib/authMfaFlow";
+import { signInWithProvider } from "@/lib/authProviders";
 import { returnToSearch } from "@/lib/authReturnTo";
 
 // Small pieces the auth pages share.
@@ -32,27 +33,29 @@ export function SubmitButton({ busy, busyLabel, children, ...props }) {
 }
 
 export function GoogleButton({ returnTo, onError }) {
+  const { t } = useI18n();
   return (
     <Button
       type="button"
       variant="outline"
       className="mb-6 h-12 w-full text-sm font-medium"
-      onClick={() => signInWithProvider("google", returnTo).catch((err) => onError(err.message || "Unable to sign in with Google"))}
+      onClick={() => signInWithProvider("google", returnTo).catch((err) => onError(err.message || t("auth.googleError")))}
     >
       <GoogleIcon className="mr-2 h-5 w-5" />
-      Continue with Google
+      {t("auth.googleButton")}
     </Button>
   );
 }
 
 export function OrDivider() {
+  const { t } = useI18n();
   return (
     <div className="relative mb-6">
       <div className="absolute inset-0 flex items-center">
         <div className="w-full border-t border-border" />
       </div>
       <div className="relative flex justify-center text-xs uppercase">
-        <span className="bg-card px-3 text-muted-foreground">or</span>
+        <span className="bg-card px-3 text-muted-foreground">{t("auth.or")}</span>
       </div>
     </div>
   );
